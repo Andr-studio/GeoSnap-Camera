@@ -1,0 +1,1 @@
+{"flutter":{"platforms":{"android":{"default":{"projectId":"geosnap-cam","appId":"1:87238050138:android:596a69e746ae9a22c63363","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"geosnap-cam","configurations":{"android":"1:87238050138:android:596a69e746ae9a22c63363","ios":"1:87238050138:ios:8afb1bc25471ece4c63363"}}}}}}
