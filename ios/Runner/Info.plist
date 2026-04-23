@@ -45,5 +45,17 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>GeoSnap necesita acceso a la camara para capturar fotos y videos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>GeoSnap necesita acceso al microfono para grabar audio en videos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>GeoSnap necesita acceso a la galeria para leer y mostrar tus capturas.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>GeoSnap necesita permiso para guardar fotos y videos en tu galeria.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>GeoSnap usa tu ubicacion para etiquetar las capturas cuando la app esta en uso.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>GeoSnap usa tu ubicacion para funciones de captura y etiquetado.</string>
 </dict>
 </plist>

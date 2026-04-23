@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:camerawesome/camerawesome_plugin.dart';
+import 'package:camerawesome/pigeon.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:video_player/video_player.dart';
 import '../widgets/shutter_button.dart';
 import '../widgets/camera_top_bar.dart';
 import '../widgets/camera_mode_selector.dart';
@@ -40,13 +44,24 @@ class _CameraScreenState extends State<CameraScreen>
   String _resolutionLabel = '12M';
   bool _isDetectingPhotoSize = false;
   bool _didApplyBestPhotoSizeOnce = false;
+  bool _isCaptureActionInProgress = false;
+  bool _isModeChangeInProgress = false;
+  DateTime? _lastShutterTapAt;
+  Timer? _recordingTimer;
+  Duration _recordingElapsed = Duration.zero;
+  bool _galleryAccessChecked = false;
+  bool _galleryAccessGranted = false;
+  String? _lastCapturePath;
+  bool _lastCaptureIsVideo = false;
   static const double _defaultMegapixels = 12.0;
   static const double _highResMegapixelsThreshold = 40.0;
+  static const Duration _shutterDebounce = Duration(milliseconds: 220);
   static const double _singleFingerSwipeDistanceThreshold = 70.0;
   static const double _singleFingerSwipeVelocityThreshold = 700.0;
   static const Duration _cameraSwitchSwipeCooldown = Duration(
     milliseconds: 700,
   );
+  static const String _galleryAlbumName = 'GeoSnap';
   List<Size> _photoSizeOptions = <Size>[];
   int _selectedPhotoSizeIndex = -1;
   Size? _appliedPhotoSize;
@@ -69,6 +84,7 @@ class _CameraScreenState extends State<CameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recordingTimer?.cancel();
     _modePageController.dispose();
     _bottomPageController.dispose();
     _pinchExpandNotifier.dispose();
@@ -94,6 +110,7 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Future<void> _switchCamera(CameraState state) async {
+    if (state is VideoRecordingCameraState) return;
     if (_isFlashMenuOpen && mounted) {
       setState(() {
         _isFlashMenuOpen = false;
@@ -112,7 +129,8 @@ class _CameraScreenState extends State<CameraScreen>
     _selectedModeNotifier.value = index;
   }
 
-  void _onModeTap(int index) {
+  void _onModeTap(int index, CameraState state) {
+    if (state is VideoRecordingCameraState) return;
     _modePageController.animateToPage(
       index,
       duration: const Duration(milliseconds: 250),
@@ -123,22 +141,192 @@ class _CameraScreenState extends State<CameraScreen>
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
     );
+    if (_selectedModeNotifier.value != index) {
+      HapticFeedback.selectionClick();
+      _selectedModeNotifier.value = index;
+    }
+    unawaited(_applyCameraHardwareMode(state));
   }
 
   // 👉 Actualiza el Hardware SOLO cuando el deslizamiento termina
-  void _applyCameraHardwareMode(CameraState state) {
+  Future<void> _applyCameraHardwareMode(CameraState state) async {
+    if (_isModeChangeInProgress) return;
     final int selectedIndex = _selectedModeNotifier.value;
     if (_pendingCameraMode == selectedIndex) return;
-    _pendingCameraMode = selectedIndex;
+    _isModeChangeInProgress = true;
 
-    if (selectedIndex == 0 || selectedIndex == 1) {
-      state.setState(CaptureMode.photo);
-    } else if (selectedIndex == 2) {
-      state.setState(CaptureMode.video);
+    try {
+      if (state is VideoRecordingCameraState && selectedIndex != 2) {
+        await state.stopRecording();
+        _stopRecordingTimer();
+      }
+
+      if (selectedIndex == 0 || selectedIndex == 1) {
+        state.setState(CaptureMode.photo);
+      } else if (selectedIndex == 2) {
+        state.setState(CaptureMode.video);
+      }
+      _pendingCameraMode = selectedIndex;
+    } finally {
+      _isModeChangeInProgress = false;
     }
   }
 
+  Future<void> _handleShutterTap(CameraState state) async {
+    if (_isCaptureActionInProgress) return;
+    final DateTime now = DateTime.now();
+    if (_lastShutterTapAt != null &&
+        now.difference(_lastShutterTapAt!) < _shutterDebounce) {
+      return;
+    }
+    _lastShutterTapAt = now;
+    _isCaptureActionInProgress = true;
+
+    try {
+      await _applyCameraHardwareMode(state);
+      final bool wantsVideo = _selectedModeNotifier.value == 2;
+
+      if (wantsVideo) {
+        if (state is VideoRecordingCameraState) {
+          await state.stopRecording();
+          _stopRecordingTimer();
+        } else if (state is VideoCameraState) {
+          await state.startRecording();
+          _startRecordingTimer();
+        } else {
+          state.setState(CaptureMode.video);
+        }
+      } else {
+        if (state is PhotoCameraState) {
+          await state.takePhoto();
+        } else if (state is VideoRecordingCameraState) {
+          await state.stopRecording();
+          _stopRecordingTimer();
+          state.setState(CaptureMode.photo);
+        } else {
+          state.setState(CaptureMode.photo);
+        }
+      }
+    } finally {
+      _isCaptureActionInProgress = false;
+    }
+  }
+
+  void _startRecordingTimer() {
+    _recordingTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _recordingElapsed = Duration.zero;
+      });
+    } else {
+      _recordingElapsed = Duration.zero;
+    }
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _recordingElapsed += const Duration(seconds: 1);
+      });
+    });
+  }
+
+  void _stopRecordingTimer({bool reset = true}) {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    if (reset && mounted) {
+      setState(() {
+        _recordingElapsed = Duration.zero;
+      });
+    } else if (reset) {
+      _recordingElapsed = Duration.zero;
+    }
+  }
+
+  String _recordingTimeLabel() {
+    final int totalSeconds = _recordingElapsed.inSeconds;
+    final int minutes = totalSeconds ~/ 60;
+    final int seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Future<bool> _ensureGalleryAccess() async {
+    if (_galleryAccessChecked) return _galleryAccessGranted;
+    _galleryAccessChecked = true;
+    try {
+      final bool hasAccess = await Gal.hasAccess();
+      if (hasAccess) {
+        _galleryAccessGranted = true;
+        return true;
+      }
+      _galleryAccessGranted = await Gal.requestAccess();
+      return _galleryAccessGranted;
+    } catch (_) {
+      _galleryAccessGranted = false;
+      return false;
+    }
+  }
+
+  Future<void> _saveMediaToGallery(MediaCapture mediaCapture) async {
+    if (mediaCapture.status != MediaCaptureStatus.success) return;
+    final String? path = mediaCapture.captureRequest.path;
+    if (path == null || path.isEmpty) return;
+    if (!await File(path).exists()) return;
+    if (!await _ensureGalleryAccess()) return;
+
+    try {
+      if (mediaCapture.isPicture) {
+        await Gal.putImage(path, album: _galleryAlbumName);
+      } else if (mediaCapture.isVideo) {
+        await Gal.putVideo(path, album: _galleryAlbumName);
+      }
+    } catch (_) {
+      // Keep capture flow resilient if gallery save fails on specific devices.
+    }
+  }
+
+  void _onMediaCaptureEvent(MediaCapture mediaCapture) {
+    if (mediaCapture.isVideo) {
+      if (mediaCapture.status == MediaCaptureStatus.capturing &&
+          mediaCapture.videoState == VideoState.started) {
+        if (_recordingTimer == null) {
+          _startRecordingTimer();
+        }
+      } else if (mediaCapture.status != MediaCaptureStatus.capturing ||
+          mediaCapture.videoState == VideoState.stopped ||
+          mediaCapture.videoState == VideoState.error) {
+        _stopRecordingTimer();
+      }
+    }
+
+    if (mediaCapture.status == MediaCaptureStatus.success) {
+      final String? path = mediaCapture.captureRequest.path;
+      if (mounted && path != null && path.isNotEmpty) {
+        setState(() {
+          _lastCapturePath = path;
+          _lastCaptureIsVideo = mediaCapture.isVideo;
+        });
+      }
+      unawaited(_saveMediaToGallery(mediaCapture));
+    }
+  }
+
+  Future<void> _openLastCapturePreview() async {
+    final String? path = _lastCapturePath;
+    if (path == null || path.isEmpty) return;
+    if (!await File(path).exists()) return;
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _MediaPreviewScreen(
+          mediaPath: path,
+          isVideo: _lastCaptureIsVideo,
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleAspectRatio(CameraState state) async {
+    if (state is VideoRecordingCameraState) return;
     HapticFeedback.selectionClick();
     if (_isFlashMenuOpen && mounted) {
       setState(() {
@@ -311,7 +499,8 @@ class _CameraScreenState extends State<CameraScreen>
     _appliedPhotoSize = selected;
   }
 
-  void _cyclePhotoResolution() {
+  void _cyclePhotoResolution(CameraState state) {
+    if (state is VideoRecordingCameraState) return;
     HapticFeedback.selectionClick();
     if (_isFlashMenuOpen && mounted) {
       setState(() {
@@ -374,7 +563,7 @@ class _CameraScreenState extends State<CameraScreen>
     return _selectedAspectRatio == 'Full' || _selectedAspectRatio == '9:16';
   }
 
-  Widget _buildModeSelectorBar(BuildContext context) {
+  Widget _buildModeSelectorBar(BuildContext context, CameraState state) {
     final Widget selector = ShaderMask(
       shaderCallback: (Rect bounds) {
         return const LinearGradient(
@@ -398,7 +587,7 @@ class _CameraScreenState extends State<CameraScreen>
             selectedIndex: index,
             pageController: _bottomPageController,
             onModeChanged: _onPageChanged,
-            onModeTap: _onModeTap,
+            onModeTap: (modeIndex) => _onModeTap(modeIndex, state),
           );
         },
       ),
@@ -419,6 +608,7 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Future<void> _switchCameraFromSwipe(CameraState state) async {
+    if (state is VideoRecordingCameraState) return;
     if (_isCameraSwitchInProgress) return;
     final DateTime now = DateTime.now();
     if (_lastSwipeCameraSwitchAt != null &&
@@ -521,6 +711,17 @@ class _CameraScreenState extends State<CameraScreen>
         children: [
           CameraAwesomeBuilder.custom(
             saveConfig: SaveConfig.photoAndVideo(
+              videoOptions: VideoOptions(
+                enableAudio: true,
+                quality: VideoRecordingQuality.highest,
+                android: AndroidVideoOptions(
+                  fallbackStrategy: QualityFallbackStrategy.lower,
+                ),
+                ios: CupertinoVideoOptions(
+                  codec: CupertinoCodecType.h264,
+                  fileType: CupertinoFileType.mpeg4,
+                ),
+              ),
               photoPathBuilder: (sensors) async {
                 final path = await _getPath('.jpg');
                 return SingleCaptureRequest(path, sensors.first);
@@ -537,11 +738,12 @@ class _CameraScreenState extends State<CameraScreen>
             ),
             previewFit: _previewFitForSelectedRatio(),
             previewAlignment: _previewAlignmentForSelectedRatio(),
+            onMediaCaptureEvent: _onMediaCaptureEvent,
             builder: (state, preview) {
               // 👉 Escucha cuando cualquier carrusel se detiene para evitar "frenazos"
               return NotificationListener<ScrollEndNotification>(
                 onNotification: (notification) {
-                  _applyCameraHardwareMode(state);
+                  unawaited(_applyCameraHardwareMode(state));
                   return false;
                 },
                 child: Stack(
@@ -578,7 +780,7 @@ class _CameraScreenState extends State<CameraScreen>
                       child: CameraTopBar(
                         aspectRatio: _selectedAspectRatio,
                         resolutionLabel: _resolutionLabel,
-                        onResolutionTap: _cyclePhotoResolution,
+                        onResolutionTap: () => _cyclePhotoResolution(state),
                         solidBlackBackground: _selectedAspectRatio == '3:4',
                         flashMode: state.sensorConfig.flashMode.name,
                         flashMenuOpen: _isFlashMenuOpen,
@@ -598,6 +800,48 @@ class _CameraScreenState extends State<CameraScreen>
                         onSettingsTap: () {},
                       ),
                     ),
+
+                    if (state is VideoRecordingCameraState)
+                      Positioned(
+                        top: MediaQuery.of(context).padding.top + 56,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withAlpha(170),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _recordingTimeLabel(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
 
                     Positioned(
                       bottom: 0,
@@ -626,7 +870,11 @@ class _CameraScreenState extends State<CameraScreen>
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
                                   children: [
-                                    _CircularPreview(onTap: () {}),
+                                    _CircularPreview(
+                                      onTap: _openLastCapturePreview,
+                                      filePath: _lastCapturePath,
+                                      isVideo: _lastCaptureIsVideo,
+                                    ),
                                     ValueListenableBuilder<int>(
                                       valueListenable: _selectedModeNotifier,
                                       builder: (context, index, _) {
@@ -634,16 +882,7 @@ class _CameraScreenState extends State<CameraScreen>
                                           isVideoMode: index == 2,
                                           isRecording: state
                                               is VideoRecordingCameraState,
-                                          onTap: () {
-                                            state.when(
-                                              onPhotoMode: (s) => s.takePhoto(),
-                                              onVideoMode: (s) =>
-                                                  s.startRecording(),
-                                              onVideoRecordingMode: (s) =>
-                                                  s.stopRecording(),
-                                              onPreviewMode: (s) {},
-                                            );
-                                          },
+                                          onTap: () => _handleShutterTap(state),
                                         );
                                       },
                                     ),
@@ -654,7 +893,7 @@ class _CameraScreenState extends State<CameraScreen>
                                   ],
                                 ),
                               ),
-                              _buildModeSelectorBar(context),
+                              _buildModeSelectorBar(context, state),
                               SizedBox(
                                 height: _selectedAspectRatio == '9:16'
                                     ? 0
@@ -1063,9 +1302,18 @@ class _RulerPainter extends CustomPainter {
 
 class _CircularPreview extends StatelessWidget {
   final VoidCallback onTap;
-  const _CircularPreview({required this.onTap});
+  final String? filePath;
+  final bool isVideo;
+  const _CircularPreview({
+    required this.onTap,
+    this.filePath,
+    this.isVideo = false,
+  });
   @override
   Widget build(BuildContext context) {
+    final bool hasMedia =
+        filePath != null && filePath!.isNotEmpty && File(filePath!).existsSync();
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1076,10 +1324,218 @@ class _CircularPreview extends StatelessWidget {
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white30),
         ),
-        child: const ClipOval(
-          child: Icon(CupertinoIcons.photo, color: Colors.white54),
+        child: ClipOval(
+          child: hasMedia
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (!isVideo)
+                      Image.file(
+                        File(filePath!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Center(
+                          child: Icon(
+                            CupertinoIcons.photo,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      )
+                    else
+                      Container(color: Colors.black45),
+                    if (isVideo)
+                      const Center(
+                        child: Icon(
+                          CupertinoIcons.play_fill,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                  ],
+                )
+              : const Icon(CupertinoIcons.photo, color: Colors.white54),
         ),
       ),
+    );
+  }
+}
+
+class _MediaPreviewScreen extends StatefulWidget {
+  final String mediaPath;
+  final bool isVideo;
+  const _MediaPreviewScreen({
+    required this.mediaPath,
+    required this.isVideo,
+  });
+
+  @override
+  State<_MediaPreviewScreen> createState() => _MediaPreviewScreenState();
+}
+
+class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
+  VideoPlayerController? _videoController;
+  Future<void>? _videoInitFuture;
+
+  Future<bool> _tryLaunchAndroidIntent(AndroidIntent intent) async {
+    try {
+      await intent.launch();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _openSystemGallery() async {
+    try {
+      if (Platform.isAndroid) {
+        final List<AndroidIntent> intents = [
+          // 1. Native Samsung Gallery (Main)
+          const AndroidIntent(
+            action: 'android.intent.action.MAIN',
+            package: 'com.sec.android.gallery3d',
+            flags: [268435456],
+          ),
+          // 2. Generic Gallery Category
+          const AndroidIntent(
+            action: 'android.intent.action.MAIN',
+            category: 'android.intent.category.APP_GALLERY',
+            flags: [268435456],
+          ),
+          // 3. Google Photos (Fallback)
+          const AndroidIntent(
+            action: 'android.intent.action.MAIN',
+            package: 'com.google.android.apps.photos',
+            flags: [268435456],
+          ),
+          // 4. Standard View for Images
+          const AndroidIntent(
+            action: 'android.intent.action.VIEW',
+            type: 'image/*',
+            flags: [268435456],
+          ),
+          // 5. Modern Photo Picker
+          const AndroidIntent(
+            action: 'android.provider.action.PICK_IMAGES',
+          ),
+        ];
+
+        for (final intent in intents) {
+          final bool launched = await _tryLaunchAndroidIntent(intent);
+          if (launched) return;
+        }
+        throw Exception('No gallery intent resolved');
+      }
+      await Gal.open();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la galeria del sistema'),
+        ),
+      );
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isVideo) {
+      final controller = VideoPlayerController.file(File(widget.mediaPath));
+      _videoController = controller;
+      _videoInitFuture = controller.initialize().then((_) {
+        if (!mounted) return;
+        controller.setLooping(true);
+        setState(() {});
+        controller.play();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Abrir galeria',
+            icon: const Icon(CupertinoIcons.photo_on_rectangle),
+            onPressed: _openSystemGallery,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        bottom: true,
+        child: widget.isVideo ? _buildVideoView() : _buildImageView(),
+      ),
+    );
+  }
+
+  Widget _buildImageView() {
+    return Center(
+      child: InteractiveViewer(
+        minScale: 1.0,
+        maxScale: 4.0,
+        child: Image.file(
+          File(widget.mediaPath),
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => const Text(
+            'No se pudo cargar la imagen',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoView() {
+    final controller = _videoController;
+    final double controlsBottomInset = MediaQuery.of(context).padding.bottom + 20;
+    if (controller == null) {
+      return const Center(
+        child: Text(
+          'No se pudo cargar el video',
+          style: TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
+    return FutureBuilder<void>(
+      future: _videoInitFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(
+            child: CupertinoActivityIndicator(radius: 12),
+          );
+        }
+        if (snapshot.hasError || !controller.value.isInitialized) {
+          return const Center(
+            child: Text(
+              'No se pudo cargar el video',
+              style: TextStyle(color: Colors.white70),
+            ),
+          );
+        }
+
+        return Center(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: controlsBottomInset),
+            child: AspectRatio(
+              aspectRatio: controller.value.aspectRatio,
+              child: VideoPlayer(controller),
+            ),
+          ),
+        );
+      },
     );
   }
 }

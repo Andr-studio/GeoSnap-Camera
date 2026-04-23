@@ -31,7 +31,29 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
-
+<queries>
+    <!-- Queries for Gallery and Images -->
+    <intent>
+        <action android:name="android.intent.action.PICK"/>
+        <data android:mimeType="image/*"/>
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.PICK"/>
+        <data android:mimeType="video/*"/>
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.GET_CONTENT"/>
+        <data android:mimeType="image/*"/>
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.GET_CONTENT"/>
+        <data android:mimeType="video/*"/>
+    </intent>
+    <!-- Native Samsung Gallery -->
+    <package android:name="com.sec.android.gallery3d" />
+    <!-- Google Photos -->
+    <package android:name="com.google.android.apps.photos" />
+</queries>
     <application
         android:label="GeoSnap Cam"
         android:name="${applicationName}"
@@ -70,6 +92,18 @@
          https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+    <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <data android:mimeType="image/*"/>
+    </intent>
+    <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <data android:mimeType="video/*"/>
+    </intent>
+    </queries>
+    
+    
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
