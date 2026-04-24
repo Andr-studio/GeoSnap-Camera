@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:camerawesome/pigeon.dart';
@@ -10,6 +11,9 @@ import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
+import 'package:geosnap_cam/services/gps_service.dart';
+import 'package:geosnap_cam/services/watermark_service.dart';
+import 'package:geosnap_cam/ui/screens/watermark_settings_screen.dart';
 import '../widgets/shutter_button.dart';
 import '../widgets/camera_top_bar.dart';
 import '../widgets/camera_mode_selector.dart';
@@ -53,6 +57,7 @@ class _CameraScreenState extends State<CameraScreen>
   bool _galleryAccessGranted = false;
   String? _lastCapturePath;
   bool _lastCaptureIsVideo = false;
+  Stopwatch? _totalCaptureStopwatch;
   static const double _defaultMegapixels = 12.0;
   static const double _highResMegapixelsThreshold = 40.0;
   static const Duration _shutterDebounce = Duration(milliseconds: 220);
@@ -65,11 +70,17 @@ class _CameraScreenState extends State<CameraScreen>
   List<Size> _photoSizeOptions = <Size>[];
   int _selectedPhotoSizeIndex = -1;
   Size? _appliedPhotoSize;
+  
+  final GpsService _gpsService = GpsService();
+  LocationData? _lastKnownLocation;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // Request permission and start location track
+    _initLocation();
 
     _modePageController =
         PageController(initialPage: _selectedModeNotifier.value);
@@ -96,6 +107,21 @@ class _CameraScreenState extends State<CameraScreen>
     setState(() {
       _isAppInBackground = state != AppLifecycleState.resumed;
     });
+    if (state == AppLifecycleState.resumed) {
+      _initLocation();
+    }
+  }
+
+  Future<void> _initLocation() async {
+    final loc = await _gpsService.getCurrentLocation();
+    if (loc != null) {
+      _lastKnownLocation = loc;
+      final WatermarkConfig config = await WatermarkService.getConfig();
+      await WatermarkService.prewarmWatermarkAssets(loc, config);
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 
   Future<String> _getPath(String extension) async {
@@ -181,6 +207,7 @@ class _CameraScreenState extends State<CameraScreen>
     }
     _lastShutterTapAt = now;
     _isCaptureActionInProgress = true;
+    _totalCaptureStopwatch = Stopwatch()..start();
 
     try {
       await _applyCameraHardwareMode(state);
@@ -188,7 +215,10 @@ class _CameraScreenState extends State<CameraScreen>
 
       if (wantsVideo) {
         if (state is VideoRecordingCameraState) {
+          final sw = Stopwatch()..start();
           await state.stopRecording();
+          sw.stop();
+          print('PERF - Tiempo de guardado de video: ${sw.elapsedMilliseconds}ms');
           _stopRecordingTimer();
         } else if (state is VideoCameraState) {
           await state.startRecording();
@@ -198,7 +228,10 @@ class _CameraScreenState extends State<CameraScreen>
         }
       } else {
         if (state is PhotoCameraState) {
+          final sw = Stopwatch()..start();
           await state.takePhoto();
+          sw.stop();
+          print('PERF - Tiempo de captura de foto: ${sw.elapsedMilliseconds}ms');
         } else if (state is VideoRecordingCameraState) {
           await state.stopRecording();
           _stopRecordingTimer();
@@ -267,10 +300,25 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<void> _saveMediaToGallery(MediaCapture mediaCapture) async {
     if (mediaCapture.status != MediaCaptureStatus.success) return;
-    final String? path = mediaCapture.captureRequest.path;
+    String? path = mediaCapture.captureRequest.path;
     if (path == null || path.isEmpty) return;
     if (!await File(path).exists()) return;
     if (!await _ensureGalleryAccess()) return;
+
+    // Use last known location directly to eliminate GPS fetch delay
+    LocationData? loc = _lastKnownLocation;
+    
+    if (loc != null) {
+      final sw = Stopwatch()..start();
+      path = await WatermarkService.applyWatermark(path, mediaCapture.isVideo, loc);
+      sw.stop();
+      print('PERF - Tiempo de pegado de marca de agua: ${sw.elapsedMilliseconds}ms');
+      if (mounted) {
+        setState(() {
+          _lastCapturePath = path;
+        });
+      }
+    }
 
     try {
       if (mediaCapture.isPicture) {
@@ -280,6 +328,12 @@ class _CameraScreenState extends State<CameraScreen>
       }
     } catch (_) {
       // Keep capture flow resilient if gallery save fails on specific devices.
+    }
+
+    if (_totalCaptureStopwatch != null) {
+      _totalCaptureStopwatch!.stop();
+      print('PERF - Tiempo TOTAL desde botón hasta guardado final: ${_totalCaptureStopwatch!.elapsedMilliseconds}ms');
+      _totalCaptureStopwatch = null;
     }
   }
 
@@ -563,6 +617,32 @@ class _CameraScreenState extends State<CameraScreen>
     return _selectedAspectRatio == 'Full' || _selectedAspectRatio == '9:16';
   }
 
+  double _watermarkBottomOffset(BuildContext context) {
+    final double safeBottom = MediaQuery.of(context).padding.bottom;
+    const double edgeGap = 10.0;
+    const double controlsHeight = 252.0;
+
+    if (_selectedAspectRatio == '9:16') {
+      return controlsHeight + edgeGap;
+    }
+    return controlsHeight + safeBottom + edgeGap;
+  }
+
+  double _watermarkTargetWidthFactor() {
+    switch (_selectedAspectRatio) {
+      case '1:1':
+        return 0.60;
+      case '3:4':
+        return 0.56;
+      case '9:16':
+        return 0.48;
+      case 'Full':
+        return 0.50;
+      default:
+        return 0.56;
+    }
+  }
+
   Widget _buildModeSelectorBar(BuildContext context, CameraState state) {
     final Widget selector = ShaderMask(
       shaderCallback: (Rect bounds) {
@@ -758,6 +838,50 @@ class _CameraScreenState extends State<CameraScreen>
                             Container(color: Colors.transparent),
                       ),
                     ),
+                    
+                    // Live Watermark Preview Overlay
+                    Positioned(
+                      left: 6,
+                      right: 6,
+                      bottom: _watermarkBottomOffset(context),
+                      child: IgnorePointer(
+                        child: ValueListenableBuilder<WatermarkConfig>(
+                          valueListenable: WatermarkService.configNotifier,
+                          builder: (context, config, child) {
+                            final double screenWidth =
+                                MediaQuery.of(context).size.width;
+                            final DateTime now = DateTime.now();
+                            final Size wmSize = WatermarkPainter.measureSize(
+                              location: _lastKnownLocation,
+                              config: config,
+                              date: now,
+                            );
+                            final ui.Image? mapImage =
+                                WatermarkService.getCachedMapImage(
+                                _lastKnownLocation,
+                                config,
+                              );
+                            return SizedBox(
+                              width: screenWidth - 12.0,
+                              child: FittedBox(
+                                fit: BoxFit.fitWidth,
+                                alignment: Alignment.bottomCenter,
+                                child: CustomPaint(
+                                  size: wmSize,
+                                  painter: WatermarkPainter(
+                                    location: _lastKnownLocation,
+                                    config: config,
+                                    date: now,
+                                    mapImage: mapImage,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
                     Positioned.fill(
                       bottom: 240,
                       child: GestureDetector(
@@ -797,7 +921,27 @@ class _CameraScreenState extends State<CameraScreen>
                               : FlashMode.on,
                         ),
                         onAspectRatioTap: () => _toggleAspectRatio(state),
-                        onSettingsTap: () {},
+                        onSettingsTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => WatermarkSettingsScreen(
+                                currentLocation: _lastKnownLocation,
+                              ),
+                            ),
+                          );
+                          if (_lastKnownLocation != null) {
+                            final WatermarkConfig config =
+                                await WatermarkService.getConfig();
+                            await WatermarkService.prewarmWatermarkAssets(
+                              _lastKnownLocation,
+                              config,
+                            );
+                          }
+                          if (mounted) {
+                            setState(() {});
+                          }
+                        },
                       ),
                     ),
 
@@ -861,6 +1005,7 @@ class _CameraScreenState extends State<CameraScreen>
                               _ZoomSelector(
                                 sensorConfig: state.sensorConfig,
                                 pinchExpandNotifier: _pinchExpandNotifier,
+                                compactMode: _selectedAspectRatio == '9:16',
                               ),
                               Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -941,9 +1086,11 @@ class _CameraScreenState extends State<CameraScreen>
 class _ZoomSelector extends StatefulWidget {
   final SensorConfig sensorConfig;
   final ValueNotifier<int> pinchExpandNotifier;
+  final bool compactMode;
   const _ZoomSelector({
     required this.sensorConfig,
     required this.pinchExpandNotifier,
+    this.compactMode = false,
   });
   @override
   State<_ZoomSelector> createState() => _ZoomSelectorState();
@@ -980,6 +1127,11 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
       oldWidget.pinchExpandNotifier.removeListener(_onPinchExpandRequested);
       widget.pinchExpandNotifier.addListener(_onPinchExpandRequested);
     }
+    // Keep 9:16 stable: avoid carrying expanded state that can overflow.
+    if (widget.compactMode && _isExpanded) {
+      _collapseTimer?.cancel();
+      _isExpanded = false;
+    }
   }
 
   @override
@@ -999,6 +1151,10 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
 
   void _onPinchExpandRequested() {
     if (!mounted) return;
+    if (widget.compactMode) {
+      // In 9:16 we keep the compact zoom bar while pinching to prevent overflow.
+      return;
+    }
     setState(() {
       _expandAndResetTimer();
     });
@@ -1040,21 +1196,23 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        transitionBuilder: (child, animation) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.2),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
-            ),
-          );
-        },
-        child: _isExpanded ? _buildExpandedView() : _buildCollapsedView(),
+      child: ClipRect(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.2),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: _isExpanded ? _buildExpandedView() : _buildCollapsedView(),
+        ),
       ),
     );
   }
@@ -1138,30 +1296,34 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
   }
 
   Widget _buildExpandedView() {
+    final bool compact = widget.compactMode;
     return SizedBox(
       key: const ValueKey('expanded'),
-      height: 104,
+      height: compact ? 82 : 104,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 10 : 12,
+              vertical: compact ? 4 : 6,
+            ),
             decoration: BoxDecoration(
               color: Colors.black.withAlpha(180),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               _zoomLabel(_currentZoom),
-              style: const TextStyle(
+              style: TextStyle(
                 color: Color(0xFFFFD700),
                 fontWeight: FontWeight.bold,
-                fontSize: 14,
+                fontSize: compact ? 12 : 14,
               ),
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: compact ? 6 : 10),
           SizedBox(
-            height: 26,
+            height: compact ? 20 : 26,
             width: double.infinity,
             child: ClipRect(
               child: CustomPaint(
@@ -1169,9 +1331,9 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
               ),
             ),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: compact ? 4 : 6),
           SizedBox(
-            height: 28,
+            height: compact ? 24 : 28,
             child: Center(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -1182,6 +1344,7 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
                       (displayZoom) => _expandedZoomBtn(
                         _stopLabel(displayZoom),
                         _toNormalizedZoom(displayZoom),
+                        compact: compact,
                         isSelected: _isStopSelected(displayZoom),
                       ),
                     ),
@@ -1226,6 +1389,7 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
   Widget _expandedZoomBtn(
     String label,
     double value, {
+    bool compact = false,
     required bool isSelected,
   }) {
     return GestureDetector(
@@ -1234,12 +1398,12 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
         widget.sensorConfig.setZoom(value);
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 15),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 15),
         child: Text(
           label,
           style: TextStyle(
             color: isSelected ? const Color(0xFFFFD700) : Colors.white,
-            fontSize: 16,
+            fontSize: compact ? 14 : 16,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
           ),
         ),
