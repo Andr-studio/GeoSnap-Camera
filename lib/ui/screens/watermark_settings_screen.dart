@@ -412,9 +412,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
       max: 4.0,
       divisions: 16,
       onChanged: (double value) {
-        _updateConfig(
-          _config.copyWith(mapAttributionOutlineWidth: value),
-        );
+        _updateConfig(_config.copyWith(mapAttributionOutlineWidth: value));
       },
     );
   }
@@ -513,7 +511,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
       colors: const <Color>[
         Color(0xFF123A55),
         Color(0xFF2A6F97),
-        Color(0xFF345B63),
+        Color.fromARGB(255, 7, 7, 7),
         Color(0xFF4C3F91),
         Color(0xFF255D42),
         Color(0xFF5C4635),

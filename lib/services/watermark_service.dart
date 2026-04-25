@@ -48,13 +48,13 @@ class WatermarkConfig {
     this.showAddress = true,
     this.showCityCoords = true,
     this.mapType = WatermarkMapType.standard,
-    this.titleScale = 0.65,
+    this.titleScale = 0.55,
     this.textScale = 0.65,
-    this.glassOpacity = 0.0,
-    this.glassWidth = 0.85,
+    this.glassOpacity = 0.55,
+    this.glassWidth = 1.0,
     this.titleColorValue = 0xFFFFFFFF,
     this.textColorValue = 0xFFFFFFFF,
-    this.glassColorValue = 0xFF123A55,
+    this.glassColorValue = 0xFF070707,
     this.mapAttributionScale = 1.0,
     this.mapAttributionOutlineWidth = 1.2,
     this.mapAttributionColorValue = 0xFFFFFFFF,
@@ -195,15 +195,15 @@ class WatermarkService {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String mapType =
         prefs.getString('wm_mapType') ?? WatermarkMapType.standard;
-    final double titleScale = prefs.getDouble('wm_titleScale') ?? 0.65;
+    final double titleScale = prefs.getDouble('wm_titleScale') ?? 0.55;
     final double textScale = prefs.getDouble('wm_textScale') ?? 0.65;
-    final double glassOpacity = prefs.getDouble('wm_glassOpacity') ?? 0.0;
-    final double glassWidth = prefs.getDouble('wm_glassWidth') ?? 0.85;
+    final double glassOpacity = prefs.getDouble('wm_glassOpacity') ?? 0.55;
+    final double glassWidth = prefs.getDouble('wm_glassWidth') ?? 1.0;
     final int titleColorValue =
         prefs.getInt('wm_titleColorValue') ?? 0xFFFFFFFF;
     final int textColorValue = prefs.getInt('wm_textColorValue') ?? 0xFFFFFFFF;
     final int glassColorValue =
-        prefs.getInt('wm_glassColorValue') ?? 0xFF123A55;
+        prefs.getInt('wm_glassColorValue') ?? 0xFF070707;
     final double mapAttributionScale =
         prefs.getDouble('wm_mapAttributionScale') ?? 1.0;
     final double mapAttributionOutlineWidth =
@@ -227,8 +227,9 @@ class WatermarkService {
       textColorValue: textColorValue,
       glassColorValue: glassColorValue,
       mapAttributionScale: mapAttributionScale.clamp(0.7, 2.2).toDouble(),
-      mapAttributionOutlineWidth:
-          mapAttributionOutlineWidth.clamp(0.0, 4.0).toDouble(),
+      mapAttributionOutlineWidth: mapAttributionOutlineWidth
+          .clamp(0.0, 4.0)
+          .toDouble(),
       mapAttributionColorValue: mapAttributionColorValue,
     );
 
@@ -249,10 +250,7 @@ class WatermarkService {
     await prefs.setInt('wm_titleColorValue', config.titleColorValue);
     await prefs.setInt('wm_textColorValue', config.textColorValue);
     await prefs.setInt('wm_glassColorValue', config.glassColorValue);
-    await prefs.setDouble(
-      'wm_mapAttributionScale',
-      config.mapAttributionScale,
-    );
+    await prefs.setDouble('wm_mapAttributionScale', config.mapAttributionScale);
     await prefs.setDouble(
       'wm_mapAttributionOutlineWidth',
       config.mapAttributionOutlineWidth,
@@ -314,9 +312,10 @@ class WatermarkService {
       final int safeWidth = targetWidth.clamp(1, photoImage.width);
       final int safeHeight = targetHeight.clamp(1, photoImage.height);
       final int x = ((photoImage.width - safeWidth) / 2).round();
-      final int y = (photoImage.height - safeHeight - (photoImage.height * 0.02))
-          .round()
-          .clamp(0, photoImage.height - safeHeight);
+      final int y =
+          (photoImage.height - safeHeight - (photoImage.height * 0.02))
+              .round()
+              .clamp(0, photoImage.height - safeHeight);
 
       final ImageEditorOption option = ImageEditorOption()
         ..outputFormat = const OutputFormat.jpeg(95)
@@ -360,11 +359,10 @@ class WatermarkService {
       outputExif = await Exif.fromPath(outputPath);
 
       final Map<String, Object> values = <String, Object>{};
-      final Map<String, Object>? sourceAttributes =
-          await sourceExif.getAttributes();
+      final Map<String, Object>? sourceAttributes = await sourceExif
+          .getAttributes();
       if (sourceAttributes != null) {
-        for (final MapEntry<String, Object> entry
-            in sourceAttributes.entries) {
+        for (final MapEntry<String, Object> entry in sourceAttributes.entries) {
           final Object value = entry.value;
           if (value is String) {
             values[entry.key] = value;
@@ -373,10 +371,10 @@ class WatermarkService {
       }
 
       final DateFormat exifDateFormat = DateFormat('yyyy:MM:dd HH:mm:ss');
-      values['DateTimeOriginal'] = values['DateTimeOriginal'] ??
-          exifDateFormat.format(DateTime.now());
-      values['DateTimeDigitized'] = values['DateTimeDigitized'] ??
-          values['DateTimeOriginal']!;
+      values['DateTimeOriginal'] =
+          values['DateTimeOriginal'] ?? exifDateFormat.format(DateTime.now());
+      values['DateTimeDigitized'] =
+          values['DateTimeDigitized'] ?? values['DateTimeOriginal']!;
       values['Orientation'] = '1';
       values['GPSLatitude'] = location.latitude;
       values['GPSLongitude'] = location.longitude;
@@ -783,10 +781,7 @@ class WatermarkPainter extends CustomPainter {
       fontFamily: 'Roboto',
     );
     final TextPainter tp = TextPainter(
-      text: TextSpan(
-        text: 'Google',
-        style: fillStyle,
-      ),
+      text: TextSpan(text: 'Google', style: fillStyle),
       textDirection: ui.TextDirection.ltr,
       maxLines: 1,
     );
@@ -1166,8 +1161,7 @@ class WatermarkPainter extends CustomPainter {
         oldDelegate.config.titleColorValue != config.titleColorValue ||
         oldDelegate.config.textColorValue != config.textColorValue ||
         oldDelegate.config.glassColorValue != config.glassColorValue ||
-        oldDelegate.config.mapAttributionScale !=
-            config.mapAttributionScale ||
+        oldDelegate.config.mapAttributionScale != config.mapAttributionScale ||
         oldDelegate.config.mapAttributionOutlineWidth !=
             config.mapAttributionOutlineWidth ||
         oldDelegate.config.mapAttributionColorValue !=
