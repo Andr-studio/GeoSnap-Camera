@@ -24,44 +24,83 @@ class WatermarkMapType {
 }
 
 class WatermarkConfig {
+  static const double widthScaleFactor = 0.85;
+
   final bool showDate;
   final bool showAddress;
   final bool showCityCoords;
   final String mapType;
+  final double titleScale;
   final double textScale;
   final double glassOpacity;
+  final double glassWidth;
+  final int titleColorValue;
+  final int textColorValue;
+  final int glassColorValue;
+  final double mapAttributionScale;
+  final double mapAttributionOutlineWidth;
+  final int mapAttributionColorValue;
 
   WatermarkConfig({
     this.showDate = true,
     this.showAddress = true,
     this.showCityCoords = true,
     this.mapType = WatermarkMapType.standard,
+    this.titleScale = 0.65,
     this.textScale = 0.65,
-    this.glassOpacity = 0.45,
+    this.glassOpacity = 0.0,
+    this.glassWidth = 0.85,
+    this.titleColorValue = 0xFFFFFFFF,
+    this.textColorValue = 0xFFFFFFFF,
+    this.glassColorValue = 0xFF123A55,
+    this.mapAttributionScale = 1.0,
+    this.mapAttributionOutlineWidth = 1.2,
+    this.mapAttributionColorValue = 0xFFFFFFFF,
   });
+
+  double get effectiveGlassWidth => glassWidth * widthScaleFactor;
 
   WatermarkConfig copyWith({
     bool? showDate,
     bool? showAddress,
     bool? showCityCoords,
     String? mapType,
+    double? titleScale,
     double? textScale,
     double? glassOpacity,
+    double? glassWidth,
+    int? titleColorValue,
+    int? textColorValue,
+    int? glassColorValue,
+    double? mapAttributionScale,
+    double? mapAttributionOutlineWidth,
+    int? mapAttributionColorValue,
   }) {
     return WatermarkConfig(
       showDate: showDate ?? this.showDate,
       showAddress: showAddress ?? this.showAddress,
       showCityCoords: showCityCoords ?? this.showCityCoords,
       mapType: mapType ?? this.mapType,
+      titleScale: titleScale ?? this.titleScale,
       textScale: textScale ?? this.textScale,
       glassOpacity: glassOpacity ?? this.glassOpacity,
+      glassWidth: glassWidth ?? this.glassWidth,
+      titleColorValue: titleColorValue ?? this.titleColorValue,
+      textColorValue: textColorValue ?? this.textColorValue,
+      glassColorValue: glassColorValue ?? this.glassColorValue,
+      mapAttributionScale: mapAttributionScale ?? this.mapAttributionScale,
+      mapAttributionOutlineWidth:
+          mapAttributionOutlineWidth ?? this.mapAttributionOutlineWidth,
+      mapAttributionColorValue:
+          mapAttributionColorValue ?? this.mapAttributionColorValue,
     );
   }
 }
 
 class WatermarkService {
-  static final ValueNotifier<WatermarkConfig> configNotifier =
-      ValueNotifier(WatermarkConfig());
+  static final ValueNotifier<WatermarkConfig> configNotifier = ValueNotifier(
+    WatermarkConfig(),
+  );
 
   static const double canvasWidth = 760.0;
   static const int _mapZoom = 16;
@@ -95,7 +134,10 @@ class WatermarkService {
                 }
               } else if (tags.containsKey('Orientation')) {
                 final String ori = tags['Orientation'].toString();
-                if (ori == '6' || ori == '8' || ori.contains('Right') || ori.contains('Left')) {
+                if (ori == '6' ||
+                    ori == '8' ||
+                    ori.contains('Right') ||
+                    ori.contains('Left')) {
                   finalW = h;
                   finalH = w;
                 }
@@ -108,7 +150,11 @@ class WatermarkService {
       }
 
       final WatermarkConfig config = await getConfig();
-      final File watermarkFile = await _createWatermarkImage(location, config, isLandscape);
+      final File watermarkFile = await _createWatermarkImage(
+        location,
+        config,
+        isLandscape,
+      );
 
       final Directory extDir = await getTemporaryDirectory();
       final String extension = p.extension(inputPath);
@@ -120,7 +166,7 @@ class WatermarkService {
       if (isVideo) {
         final String command =
             '-y -i "$inputPath" -i "${watermarkFile.path}" '
-            '-filter_complex "[1:v][0:v]scale2ref=w=iw:h=trunc(iw*main_h/main_w/2)*2[wm][vid];[vid][wm]overlay=0:H-h[out]" '
+            "-filter_complex \"[1:v][0:v]scale2ref=w='main_w*min(iw,ih)/2280':h='main_h*min(iw,ih)/2280'[wm][vid];[vid][wm]overlay=(W-w)/2:H-h-(H*0.02)[out]\" "
             '-map "[out]" -map 0:a? -c:v libx264 -preset ultrafast -crf 23 -c:a copy "$outputPath"';
 
         final session = await FFmpegKit.execute(command);
@@ -130,8 +176,9 @@ class WatermarkService {
         return inputPath;
       }
 
-      final String command = '-y -i "$inputPath" -i "${watermarkFile.path}" '
-          '-filter_complex "[1:v][0:v]scale2ref=w=iw:h=iw*main_h/main_w[wm][vid];[vid][wm]overlay=0:H-h" '
+      final String command =
+          '-y -i "$inputPath" -i "${watermarkFile.path}" '
+          "-filter_complex \"[1:v][0:v]scale2ref=w='main_w*min(iw,ih)/2280':h='main_h*min(iw,ih)/2280'[wm][vid];[vid][wm]overlay=(W-w)/2:H-h-(H*0.02)\" "
           '-q:v 2 "$outputPath"';
 
       final session = await FFmpegKit.execute(command);
@@ -147,9 +194,24 @@ class WatermarkService {
 
   static Future<WatermarkConfig> getConfig() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final String mapType = prefs.getString('wm_mapType') ?? WatermarkMapType.standard;
+    final String mapType =
+        prefs.getString('wm_mapType') ?? WatermarkMapType.standard;
+    final double titleScale = prefs.getDouble('wm_titleScale') ?? 0.65;
     final double textScale = prefs.getDouble('wm_textScale') ?? 0.65;
-    final double glassOpacity = prefs.getDouble('wm_glassOpacity') ?? 0.45;
+    final double glassOpacity = prefs.getDouble('wm_glassOpacity') ?? 0.0;
+    final double glassWidth = prefs.getDouble('wm_glassWidth') ?? 0.85;
+    final int titleColorValue =
+        prefs.getInt('wm_titleColorValue') ?? 0xFFFFFFFF;
+    final int textColorValue = prefs.getInt('wm_textColorValue') ?? 0xFFFFFFFF;
+    final int glassColorValue =
+        prefs.getInt('wm_glassColorValue') ?? 0xFF123A55;
+    final double mapAttributionScale =
+        prefs.getDouble('wm_mapAttributionScale') ?? 1.0;
+    final double mapAttributionOutlineWidth =
+        prefs.getDouble('wm_mapAttributionOutlineWidth') ??
+        ((prefs.getBool('wm_mapAttributionShadow') ?? true) ? 1.2 : 0.0);
+    final int mapAttributionColorValue =
+        prefs.getInt('wm_mapAttributionColorValue') ?? 0xFFFFFFFF;
 
     final WatermarkConfig config = WatermarkConfig(
       showDate: prefs.getBool('wm_showDate') ?? true,
@@ -158,8 +220,17 @@ class WatermarkService {
       mapType: WatermarkMapType.values.contains(mapType)
           ? mapType
           : WatermarkMapType.standard,
-      textScale: textScale.clamp(0.4, 1.6),
-      glassOpacity: glassOpacity.clamp(0.0, 1.0),
+      titleScale: titleScale.clamp(0.4, 1.6).toDouble(),
+      textScale: textScale.clamp(0.4, 1.6).toDouble(),
+      glassOpacity: glassOpacity.clamp(0.0, 1.0).toDouble(),
+      glassWidth: glassWidth.clamp(0.5, 1.0).toDouble(),
+      titleColorValue: titleColorValue,
+      textColorValue: textColorValue,
+      glassColorValue: glassColorValue,
+      mapAttributionScale: mapAttributionScale.clamp(0.7, 2.2).toDouble(),
+      mapAttributionOutlineWidth:
+          mapAttributionOutlineWidth.clamp(0.0, 4.0).toDouble(),
+      mapAttributionColorValue: mapAttributionColorValue,
     );
 
     configNotifier.value = config;
@@ -172,14 +243,38 @@ class WatermarkService {
     await prefs.setBool('wm_showAddress', config.showAddress);
     await prefs.setBool('wm_showCityCoords', config.showCityCoords);
     await prefs.setString('wm_mapType', config.mapType);
+    await prefs.setDouble('wm_titleScale', config.titleScale);
     await prefs.setDouble('wm_textScale', config.textScale);
     await prefs.setDouble('wm_glassOpacity', config.glassOpacity);
+    await prefs.setDouble('wm_glassWidth', config.glassWidth);
+    await prefs.setInt('wm_titleColorValue', config.titleColorValue);
+    await prefs.setInt('wm_textColorValue', config.textColorValue);
+    await prefs.setInt('wm_glassColorValue', config.glassColorValue);
+    await prefs.setDouble(
+      'wm_mapAttributionScale',
+      config.mapAttributionScale,
+    );
+    await prefs.setDouble(
+      'wm_mapAttributionOutlineWidth',
+      config.mapAttributionOutlineWidth,
+    );
+    await prefs.setInt(
+      'wm_mapAttributionColorValue',
+      config.mapAttributionColorValue,
+    );
     configNotifier.value = config;
   }
 
-  static ui.Image? getCachedMapImage(LocationData? location, WatermarkConfig config) {
+  static ui.Image? getCachedMapImage(
+    LocationData? location,
+    WatermarkConfig config,
+  ) {
     if (location == null) return null;
-    final _TileCoord tile = _latLonToTile(location.latitude, location.longitude, _mapZoom);
+    final _TileCoord tile = _latLonToTile(
+      location.latitude,
+      location.longitude,
+      _mapZoom,
+    );
     return _mapCache[_cacheKey(config.mapType, tile.x, tile.y, _mapZoom)];
   }
 
@@ -207,7 +302,8 @@ class WatermarkService {
       mapType: config.mapType,
     );
 
-    final double canvasW = isLandscape ? 1140.0 : canvasWidth;
+    final double baseW = isLandscape ? 1013.0 : WatermarkService.canvasWidth;
+    final double canvasW = baseW * config.effectiveGlassWidth;
 
     final Size size = WatermarkPainter.measureSize(
       location: location,
@@ -216,7 +312,8 @@ class WatermarkService {
       canvasWidth: canvasW,
     );
 
-    final double scale = 3.0; // Export at 3x resolution for high quality when scaling up
+    final double scale =
+        3.0; // Export at 3x resolution for high quality when scaling up
     final Size scaledSize = size * scale;
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
@@ -233,11 +330,18 @@ class WatermarkService {
     painter.paint(canvas, size);
 
     final ui.Picture picture = recorder.endRecording();
-    final ui.Image image = await picture.toImage(scaledSize.width.toInt(), scaledSize.height.toInt());
-    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final ui.Image image = await picture.toImage(
+      scaledSize.width.toInt(),
+      scaledSize.height.toInt(),
+    );
+    final ByteData? byteData = await image.toByteData(
+      format: ui.ImageByteFormat.png,
+    );
 
     final Directory extDir = await getTemporaryDirectory();
-    final File imgFile = File(p.join(extDir.path, 'wm_${now.millisecondsSinceEpoch}.png'));
+    final File imgFile = File(
+      p.join(extDir.path, 'wm_${now.millisecondsSinceEpoch}.png'),
+    );
     await imgFile.writeAsBytes(byteData!.buffer.asUint8List());
 
     return imgFile;
@@ -254,7 +358,12 @@ class WatermarkService {
     if (cached != null) return cached;
 
     try {
-      final Uri uri = _buildTileUri(mapType: mapType, x: tile.x, y: tile.y, z: _mapZoom);
+      final Uri uri = _buildTileUri(
+        mapType: mapType,
+        x: tile.x,
+        y: tile.y,
+        z: _mapZoom,
+      );
       final http.Response response = await http.get(uri);
       if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
         return null;
@@ -302,14 +411,15 @@ class WatermarkService {
     final int x = (((lon + 180.0) / 360.0) * n).floor();
     final double latRad = clampedLat * math.pi / 180.0;
     final int y =
-        ((1.0 - math.log(math.tan(latRad) + (1.0 / math.cos(latRad))) / math.pi) / 2.0 * n)
+        ((1.0 -
+                    math.log(math.tan(latRad) + (1.0 / math.cos(latRad))) /
+                        math.pi) /
+                2.0 *
+                n)
             .floor();
 
     final int maxTile = n.toInt() - 1;
-    return _TileCoord(
-      x: x.clamp(0, maxTile),
-      y: y.clamp(0, maxTile),
-    );
+    return _TileCoord(x: x.clamp(0, maxTile), y: y.clamp(0, maxTile));
   }
 
   static Future<ui.Image> _decodeImage(Uint8List bytes) async {
@@ -356,7 +466,7 @@ class WatermarkPainter extends CustomPainter {
       date: date,
       maxWidth: canvasWidth,
     );
-    return Size(canvasWidth, m.totalHeight);
+    return Size(m.actualTotalWidth, m.totalHeight);
   }
 
   @override
@@ -365,28 +475,54 @@ class WatermarkPainter extends CustomPainter {
       location: location,
       config: config,
       date: date,
-      maxWidth: size.width,
+      maxWidth: canvasWidth,
     );
 
+    final double offsetX = (size.width - measured.actualTotalWidth) / 2.0;
+    if (offsetX > 0) {
+      canvas.translate(offsetX, 0);
+    }
+
+    final RRect glassRRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, measured.actualTotalWidth, measured.totalHeight),
+      const Radius.circular(24),
+    );
+    final Color glassColor = Color(config.glassColorValue);
+    final double glassAlpha = config.glassOpacity.clamp(0.0, 1.0).toDouble();
     final Paint bgPaint = Paint()
       ..shader = ui.Gradient.linear(
         const Offset(0, 0),
         Offset(0, size.height),
         [
-          Colors.black.withValues(alpha: config.glassOpacity),
-          Colors.black.withValues(alpha: (config.glassOpacity + 0.3).clamp(0.0, 1.0)),
+          glassColor.withValues(alpha: glassAlpha * 0.62),
+          Colors.black.withValues(alpha: glassAlpha * 0.72),
+          glassColor.withValues(alpha: glassAlpha * 0.36),
         ],
+        [0.0, 0.52, 1.0],
       )
       ..style = PaintingStyle.fill;
 
-    final Paint borderPaint = Paint()..color = Colors.white.withValues(alpha: 0.15)..style = PaintingStyle.stroke..strokeWidth = 1.0;
+    final Paint waterGlowPaint = Paint()
+      ..shader = ui.Gradient.linear(
+        const Offset(0, 0),
+        Offset(measured.actualTotalWidth, measured.totalHeight),
+        [
+          Colors.white.withValues(alpha: glassAlpha * 0.20),
+          glassColor.withValues(alpha: glassAlpha * 0.12),
+          Colors.transparent,
+        ],
+        [0.0, 0.36, 1.0],
+      )
+      ..style = PaintingStyle.fill;
 
-    final RRect panel = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      const Radius.circular(20),
-    );
-    canvas.drawRRect(panel, bgPaint);
-    canvas.drawRRect(panel, borderPaint);
+    final Paint borderPaint = Paint()
+      ..color = Colors.white.withValues(alpha: glassAlpha * 0.22)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    canvas.drawRRect(glassRRect, bgPaint);
+    canvas.drawRRect(glassRRect, waterGlowPaint);
+    canvas.drawRRect(glassRRect, borderPaint);
 
     final Rect mapRect = Rect.fromLTWH(
       _padding,
@@ -409,7 +545,16 @@ class WatermarkPainter extends CustomPainter {
       maxWidth: textMaxWidth,
     );
 
-    y += measured.blockGap;
+    y += measured.titleDividerGap;
+    final Paint dividerPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.18)
+      ..strokeWidth = 1.0;
+    canvas.drawLine(
+      Offset(contentX, y),
+      Offset(contentX + textMaxWidth, y),
+      dividerPaint,
+    );
+    y += measured.titleDividerGap;
 
     if (config.showAddress) {
       y = _paintParagraph(
@@ -446,10 +591,8 @@ class WatermarkPainter extends CustomPainter {
       );
     }
 
-    final double weatherTop = _padding + measured.innerHeight - measured.weatherRowHeight;
-    final Paint dividerPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.18)
-      ..strokeWidth = 1.0;
+    final double weatherTop =
+        _padding + measured.innerHeight - measured.weatherRowHeight;
 
     canvas.drawLine(
       Offset(contentX, weatherTop - measured.weatherDividerGap),
@@ -467,13 +610,21 @@ class WatermarkPainter extends CustomPainter {
   }
 
   void _drawMap(Canvas canvas, Rect rect) {
-    final RRect mapRRect = RRect.fromRectAndRadius(rect, const Radius.circular(16));
+    final RRect mapRRect = RRect.fromRectAndRadius(
+      rect,
+      const Radius.circular(16),
+    );
 
     canvas.save();
     canvas.clipRRect(mapRRect);
 
     if (mapImage != null) {
-      final Rect src = Rect.fromLTWH(0, 0, mapImage!.width.toDouble(), mapImage!.height.toDouble());
+      final Rect src = Rect.fromLTWH(
+        0,
+        0,
+        mapImage!.width.toDouble(),
+        mapImage!.height.toDouble(),
+      );
       canvas.drawImageRect(mapImage!, src, rect, Paint());
     } else {
       final Paint fallbackPaint = Paint()
@@ -490,10 +641,20 @@ class WatermarkPainter extends CustomPainter {
       for (int i = 1; i < 6; i++) {
         final double dx = rect.left + (rect.width / 6) * i;
         final double dy = rect.top + (rect.height / 6) * i;
-        canvas.drawLine(Offset(dx, rect.top), Offset(dx, rect.bottom), linePaint);
-        canvas.drawLine(Offset(rect.left, dy), Offset(rect.right, dy), linePaint);
+        canvas.drawLine(
+          Offset(dx, rect.top),
+          Offset(dx, rect.bottom),
+          linePaint,
+        );
+        canvas.drawLine(
+          Offset(rect.left, dy),
+          Offset(rect.right, dy),
+          linePaint,
+        );
       }
     }
+
+    _drawMapAttribution(canvas, rect);
 
     final Offset center = Offset(rect.center.dx, rect.center.dy);
     final Paint pinPaint = Paint()..color = const Color(0xFFFF3B30);
@@ -501,6 +662,63 @@ class WatermarkPainter extends CustomPainter {
     canvas.drawCircle(center, 4, Paint()..color = Colors.white);
 
     canvas.restore();
+  }
+
+  void _drawMapAttribution(Canvas canvas, Rect rect) {
+    final Color color = Color(config.mapAttributionColorValue);
+    final double scale = config.mapAttributionScale.clamp(0.7, 2.2).toDouble();
+    final double outlineWidth = config.mapAttributionOutlineWidth
+        .clamp(0.0, 4.0)
+        .toDouble();
+    final TextStyle fillStyle = TextStyle(
+      color: color,
+      fontSize: 13 * scale,
+      fontWeight: FontWeight.w700,
+      fontFamily: 'Roboto',
+    );
+    final TextPainter tp = TextPainter(
+      text: TextSpan(
+        text: 'Google',
+        style: fillStyle,
+      ),
+      textDirection: ui.TextDirection.ltr,
+      maxLines: 1,
+    );
+    tp.layout();
+
+    final Rect labelBg = Rect.fromLTWH(
+      rect.left + 8,
+      rect.bottom - tp.height - 9,
+      tp.width + (10 * scale),
+      tp.height + (4 * scale),
+    );
+    final Offset textOffset = Offset(
+      labelBg.left + (5 * scale),
+      labelBg.top + (2 * scale),
+    );
+
+    if (outlineWidth > 0) {
+      final TextPainter outlineTp = TextPainter(
+        text: TextSpan(
+          text: 'Google',
+          style: TextStyle(
+            foreground: Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = outlineWidth * scale
+              ..strokeJoin = StrokeJoin.round
+              ..color = Colors.black,
+            fontSize: 13 * scale,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'Roboto',
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+        maxLines: 1,
+      );
+      outlineTp.layout();
+      outlineTp.paint(canvas, textOffset);
+    }
+    tp.paint(canvas, textOffset);
   }
 
   double _paintParagraph(
@@ -547,6 +765,15 @@ class WatermarkPainter extends CustomPainter {
     }
   }
 
+  static double _textWidth(String text, TextStyle style) {
+    final TextPainter tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: ui.TextDirection.ltr,
+    );
+    tp.layout();
+    return tp.width;
+  }
+
   static _MeasuredLayout _measure({
     required LocationData? location,
     required WatermarkConfig config,
@@ -570,26 +797,34 @@ class WatermarkPainter extends CustomPainter {
     final String coordsLine =
         '🎯 Lat ${_coordValue(safeLocation?.latitude)}, Long ${_coordValue(safeLocation?.longitude)}';
 
-    final String timezoneLabel = _timezoneLabel(safeLocation?.timezone ?? '', date.timeZoneOffset);
-    final String dateLine = '🕒 ${_dateLabel(date, countryCode)}  $timezoneLabel';
+    final String timezoneLabel = _timezoneLabel(
+      safeLocation?.timezone ?? '',
+      date.timeZoneOffset,
+    );
+    final String dateLine =
+        '🕒 ${_dateLabel(date, countryCode)}  $timezoneLabel';
 
-    final double s = config.textScale.clamp(0.4, 1.6);
+    final double titleS = config.titleScale.clamp(0.4, 1.6).toDouble();
+    final double s = config.textScale.clamp(0.4, 1.6).toDouble();
+    final double layoutS = math.max(titleS, s);
+    final Color titleColor = Color(config.titleColorValue);
+    final Color textColor = Color(config.textColorValue);
     final TextStyle titleStyle = TextStyle(
-      color: Colors.white,
-      fontSize: 44 * s,
+      color: titleColor,
+      fontSize: 44 * titleS,
       fontWeight: FontWeight.w700,
       fontFamily: 'Roboto',
       height: 1.08,
     );
     final TextStyle bodyStyle = TextStyle(
-      color: Colors.white.withValues(alpha: 0.94),
+      color: textColor.withValues(alpha: 0.94),
       fontSize: 28 * s,
       fontWeight: FontWeight.w500,
       fontFamily: 'Roboto',
       height: 1.2,
     );
     final TextStyle metricStyle = TextStyle(
-      color: Colors.white,
+      color: textColor,
       fontSize: 32 * s,
       fontWeight: FontWeight.w600,
       fontFamily: 'Roboto',
@@ -597,16 +832,33 @@ class WatermarkPainter extends CustomPainter {
     );
 
     final double mapWidth = 176;
-    final double contentWidth =
+    final double maxAllowedContentWidth =
         maxWidth - _padding - mapWidth - _horizontalGap - _padding;
 
-    final double blockGap = 8 * s;
-    final double lineGap = 5 * s;
+    double maxTextWidth = 0;
+    maxTextWidth = math.max(maxTextWidth, _textWidth(title, titleStyle));
+    if (config.showAddress)
+      maxTextWidth = math.max(maxTextWidth, _textWidth(addressLine, bodyStyle));
+    if (config.showCityCoords)
+      maxTextWidth = math.max(maxTextWidth, _textWidth(coordsLine, bodyStyle));
+    if (config.showDate)
+      maxTextWidth = math.max(maxTextWidth, _textWidth(dateLine, bodyStyle));
+
     final double weatherDividerGap = 10 * s;
+    final double weatherWidth =
+        (_textWidth('? --.- °C', metricStyle) * 3) + (weatherDividerGap * 2);
+    maxTextWidth = math.max(maxTextWidth, weatherWidth);
+
+    final double contentWidth = math.min(maxTextWidth, maxAllowedContentWidth);
+    final double actualTotalWidth =
+        _padding + mapWidth + _horizontalGap + contentWidth + _padding;
+
+    final double titleDividerGap = 10 * layoutS;
+    final double lineGap = 5 * s;
 
     double textBlockHeight = 0;
     textBlockHeight += _textHeight(title, titleStyle, contentWidth);
-    textBlockHeight += blockGap;
+    textBlockHeight += (titleDividerGap * 2) + 1;
 
     if (config.showAddress) {
       textBlockHeight += _textHeight(addressLine, bodyStyle, contentWidth);
@@ -620,11 +872,12 @@ class WatermarkPainter extends CustomPainter {
       textBlockHeight += _textHeight(dateLine, bodyStyle, contentWidth);
     }
 
-    final double weatherRowHeight = _textHeight('? --.- °C', metricStyle, contentWidth / 3) + 2;
+    final double weatherRowHeight =
+        _textHeight('? --.- °C', metricStyle, contentWidth / 3) + 2;
 
     final double rightMinHeight =
         textBlockHeight + (weatherDividerGap * 2) + weatherRowHeight + 4;
-    final double innerHeight = math.max(190 * s, rightMinHeight);
+    final double innerHeight = math.max(190 * layoutS, rightMinHeight);
     final double totalHeight = innerHeight + (_padding * 2);
 
     return _MeasuredLayout(
@@ -637,12 +890,13 @@ class WatermarkPainter extends CustomPainter {
       metricStyle: metricStyle,
       mapWidth: mapWidth,
       contentWidth: contentWidth,
-      blockGap: blockGap,
+      titleDividerGap: titleDividerGap,
       lineGap: lineGap,
       weatherDividerGap: weatherDividerGap,
       weatherRowHeight: weatherRowHeight,
       innerHeight: innerHeight,
       totalHeight: totalHeight,
+      actualTotalWidth: actualTotalWidth,
       temperatureLabel: _temperatureLabel(safeLocation),
       windLabel: _windLabel(safeLocation),
       uvLabel: _uvLabel(safeLocation),
@@ -670,13 +924,33 @@ class WatermarkPainter extends CustomPainter {
     required String countryCode,
   }) {
     final List<String> parts = <String>[];
-    if (city.isNotEmpty) parts.add(city);
-    if (region.isNotEmpty && region.toLowerCase() != city.toLowerCase()) parts.add(region);
+    final Map<String, int> repeatedPlaceCounts = <String, int>{};
+
+    _appendTitlePlaceParts(parts, repeatedPlaceCounts, city);
+    _appendTitlePlaceParts(parts, repeatedPlaceCounts, region);
     if (country.isNotEmpty) parts.add(country);
 
     final String fallback = parts.isEmpty ? 'Ubicación GPS' : parts.join(', ');
     final String flag = _flagEmoji(countryCode);
     return flag.isEmpty ? fallback : '$fallback $flag';
+  }
+
+  static void _appendTitlePlaceParts(
+    List<String> parts,
+    Map<String, int> repeatedPlaceCounts,
+    String value,
+  ) {
+    for (final String rawPart in value.split(',')) {
+      final String part = rawPart.trim();
+      if (part.isEmpty) continue;
+
+      final String key = part.toLowerCase();
+      final int count = repeatedPlaceCounts[key] ?? 0;
+      if (count >= 2) continue;
+
+      parts.add(part);
+      repeatedPlaceCounts[key] = count + 1;
+    }
   }
 
   static String _buildAddressLine(LocationData? location) {
@@ -697,10 +971,35 @@ class WatermarkPainter extends CustomPainter {
   }
 
   static String _dateLabel(DateTime date, String countryCode) {
-    final bool isEnglish = ['US', 'GB', 'AU', 'CA', 'NZ', 'IE'].contains(countryCode.trim().toUpperCase());
-    final List<String> daysEs = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    final List<String> daysEn = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    final String dayName = isEnglish ? daysEn[date.weekday - 1] : daysEs[date.weekday - 1];
+    final bool isEnglish = [
+      'US',
+      'GB',
+      'AU',
+      'CA',
+      'NZ',
+      'IE',
+    ].contains(countryCode.trim().toUpperCase());
+    final List<String> daysEs = [
+      'Lunes',
+      'Martes',
+      'Miércoles',
+      'Jueves',
+      'Viernes',
+      'Sábado',
+      'Domingo',
+    ];
+    final List<String> daysEn = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final String dayName = isEnglish
+        ? daysEn[date.weekday - 1]
+        : daysEs[date.weekday - 1];
     final DateFormat formatter = DateFormat('dd/MM/yyyy h:mm a');
     return '$dayName, ${formatter.format(date)}';
   }
@@ -754,8 +1053,19 @@ class WatermarkPainter extends CustomPainter {
         oldDelegate.config.showAddress != config.showAddress ||
         oldDelegate.config.showCityCoords != config.showCityCoords ||
         oldDelegate.config.mapType != config.mapType ||
+        oldDelegate.config.titleScale != config.titleScale ||
         oldDelegate.config.textScale != config.textScale ||
         oldDelegate.config.glassOpacity != config.glassOpacity ||
+        oldDelegate.config.glassWidth != config.glassWidth ||
+        oldDelegate.config.titleColorValue != config.titleColorValue ||
+        oldDelegate.config.textColorValue != config.textColorValue ||
+        oldDelegate.config.glassColorValue != config.glassColorValue ||
+        oldDelegate.config.mapAttributionScale !=
+            config.mapAttributionScale ||
+        oldDelegate.config.mapAttributionOutlineWidth !=
+            config.mapAttributionOutlineWidth ||
+        oldDelegate.config.mapAttributionColorValue !=
+            config.mapAttributionColorValue ||
         oldDelegate.date.minute != date.minute ||
         oldDelegate.mapImage != mapImage;
   }
@@ -771,12 +1081,13 @@ class _MeasuredLayout {
   final TextStyle metricStyle;
   final double mapWidth;
   final double contentWidth;
-  final double blockGap;
+  final double titleDividerGap;
   final double lineGap;
   final double weatherDividerGap;
   final double weatherRowHeight;
   final double innerHeight;
   final double totalHeight;
+  final double actualTotalWidth;
   final String temperatureLabel;
   final String windLabel;
   final String uvLabel;
@@ -791,12 +1102,13 @@ class _MeasuredLayout {
     required this.metricStyle,
     required this.mapWidth,
     required this.contentWidth,
-    required this.blockGap,
+    required this.titleDividerGap,
     required this.lineGap,
     required this.weatherDividerGap,
     required this.weatherRowHeight,
     required this.innerHeight,
     required this.totalHeight,
+    required this.actualTotalWidth,
     required this.temperatureLabel,
     required this.windLabel,
     required this.uvLabel,

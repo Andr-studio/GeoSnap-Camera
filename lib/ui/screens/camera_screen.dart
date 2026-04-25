@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:camerawesome/pigeon.dart';
@@ -27,12 +26,17 @@ class CameraScreen extends StatefulWidget {
 
 class _CameraScreenState extends State<CameraScreen>
     with WidgetsBindingObserver {
-  final List<String> _modes = ['Retrato', 'Imagen', 'Video'];
+  static const int _imageModeIndex = 0;
+  static const int _videoModeIndex = 1;
+
+  final List<String> _modes = ['Imagen', 'Video'];
   late PageController _modePageController;
   late PageController _bottomPageController;
-  final ValueNotifier<int> _selectedModeNotifier = ValueNotifier(1);
+  final ValueNotifier<int> _selectedModeNotifier = ValueNotifier(
+    _imageModeIndex,
+  );
   final ValueNotifier<int> _pinchExpandNotifier = ValueNotifier(0);
-  int _pendingCameraMode = 1;
+  int _pendingCameraMode = _imageModeIndex;
   bool _isAppInBackground = false;
   bool _isFlashMenuOpen = false;
   bool _isCameraSwitchInProgress = false;
@@ -52,11 +56,17 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isModeChangeInProgress = false;
   DateTime? _lastShutterTapAt;
   Timer? _recordingTimer;
+  Timer? _focusUiTimer;
   Duration _recordingElapsed = Duration.zero;
   bool _galleryAccessChecked = false;
   bool _galleryAccessGranted = false;
   String? _lastCapturePath;
   bool _lastCaptureIsVideo = false;
+  bool _gpsReadyHapticPlayed = false;
+  Offset? _focusPoint;
+  bool _focusLocked = false;
+  bool _exposureControlVisible = false;
+  double _brightness = 0.5;
   Stopwatch? _totalCaptureStopwatch;
   static const double _defaultMegapixels = 12.0;
   static const double _highResMegapixelsThreshold = 40.0;
@@ -70,7 +80,7 @@ class _CameraScreenState extends State<CameraScreen>
   List<Size> _photoSizeOptions = <Size>[];
   int _selectedPhotoSizeIndex = -1;
   Size? _appliedPhotoSize;
-  
+
   final GpsService _gpsService = GpsService();
   LocationData? _lastKnownLocation;
 
@@ -78,12 +88,13 @@ class _CameraScreenState extends State<CameraScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Request permission and start location track
     _initLocation();
 
-    _modePageController =
-        PageController(initialPage: _selectedModeNotifier.value);
+    _modePageController = PageController(
+      initialPage: _selectedModeNotifier.value,
+    );
     _bottomPageController = PageController(
       initialPage: _selectedModeNotifier.value,
       viewportFraction: 0.22,
@@ -96,6 +107,7 @@ class _CameraScreenState extends State<CameraScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _recordingTimer?.cancel();
+    _focusUiTimer?.cancel();
     _modePageController.dispose();
     _bottomPageController.dispose();
     _pinchExpandNotifier.dispose();
@@ -118,6 +130,10 @@ class _CameraScreenState extends State<CameraScreen>
       _lastKnownLocation = loc;
       final WatermarkConfig config = await WatermarkService.getConfig();
       await WatermarkService.prewarmWatermarkAssets(loc, config);
+      if (!_gpsReadyHapticPlayed) {
+        _gpsReadyHapticPlayed = true;
+        HapticFeedback.mediumImpact();
+      }
       if (mounted) {
         setState(() {});
       }
@@ -151,7 +167,7 @@ class _CameraScreenState extends State<CameraScreen>
   void _onPageChanged(int index) {
     if (index == _selectedModeNotifier.value) return;
 
-    HapticFeedback.selectionClick();
+    HapticFeedback.mediumImpact();
     _selectedModeNotifier.value = index;
   }
 
@@ -168,7 +184,7 @@ class _CameraScreenState extends State<CameraScreen>
       curve: Curves.easeOutCubic,
     );
     if (_selectedModeNotifier.value != index) {
-      HapticFeedback.selectionClick();
+      HapticFeedback.mediumImpact();
       _selectedModeNotifier.value = index;
     }
     unawaited(_applyCameraHardwareMode(state));
@@ -182,14 +198,15 @@ class _CameraScreenState extends State<CameraScreen>
     _isModeChangeInProgress = true;
 
     try {
-      if (state is VideoRecordingCameraState && selectedIndex != 2) {
+      if (state is VideoRecordingCameraState &&
+          selectedIndex != _videoModeIndex) {
         await state.stopRecording();
         _stopRecordingTimer();
       }
 
-      if (selectedIndex == 0 || selectedIndex == 1) {
+      if (selectedIndex == _imageModeIndex) {
         state.setState(CaptureMode.photo);
-      } else if (selectedIndex == 2) {
+      } else if (selectedIndex == _videoModeIndex) {
         state.setState(CaptureMode.video);
       }
       _pendingCameraMode = selectedIndex;
@@ -211,14 +228,16 @@ class _CameraScreenState extends State<CameraScreen>
 
     try {
       await _applyCameraHardwareMode(state);
-      final bool wantsVideo = _selectedModeNotifier.value == 2;
+      final bool wantsVideo = _selectedModeNotifier.value == _videoModeIndex;
 
       if (wantsVideo) {
         if (state is VideoRecordingCameraState) {
           final sw = Stopwatch()..start();
           await state.stopRecording();
           sw.stop();
-          print('PERF - Tiempo de guardado de video: ${sw.elapsedMilliseconds}ms');
+          print(
+            'PERF - Tiempo de guardado de video: ${sw.elapsedMilliseconds}ms',
+          );
           _stopRecordingTimer();
         } else if (state is VideoCameraState) {
           await state.startRecording();
@@ -231,7 +250,9 @@ class _CameraScreenState extends State<CameraScreen>
           final sw = Stopwatch()..start();
           await state.takePhoto();
           sw.stop();
-          print('PERF - Tiempo de captura de foto: ${sw.elapsedMilliseconds}ms');
+          print(
+            'PERF - Tiempo de captura de foto: ${sw.elapsedMilliseconds}ms',
+          );
         } else if (state is VideoRecordingCameraState) {
           await state.stopRecording();
           _stopRecordingTimer();
@@ -307,12 +328,18 @@ class _CameraScreenState extends State<CameraScreen>
 
     // Use last known location directly to eliminate GPS fetch delay
     LocationData? loc = _lastKnownLocation;
-    
+
     if (loc != null) {
       final sw = Stopwatch()..start();
-      path = await WatermarkService.applyWatermark(path, mediaCapture.isVideo, loc);
+      path = await WatermarkService.applyWatermark(
+        path,
+        mediaCapture.isVideo,
+        loc,
+      );
       sw.stop();
-      print('PERF - Tiempo de pegado de marca de agua: ${sw.elapsedMilliseconds}ms');
+      print(
+        'PERF - Tiempo de pegado de marca de agua: ${sw.elapsedMilliseconds}ms',
+      );
       if (mounted) {
         setState(() {
           _lastCapturePath = path;
@@ -332,7 +359,9 @@ class _CameraScreenState extends State<CameraScreen>
 
     if (_totalCaptureStopwatch != null) {
       _totalCaptureStopwatch!.stop();
-      print('PERF - Tiempo TOTAL desde botón hasta guardado final: ${_totalCaptureStopwatch!.elapsedMilliseconds}ms');
+      print(
+        'PERF - Tiempo TOTAL desde botón hasta guardado final: ${_totalCaptureStopwatch!.elapsedMilliseconds}ms',
+      );
       _totalCaptureStopwatch = null;
     }
   }
@@ -371,10 +400,8 @@ class _CameraScreenState extends State<CameraScreen>
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _MediaPreviewScreen(
-          mediaPath: path,
-          isVideo: _lastCaptureIsVideo,
-        ),
+        builder: (_) =>
+            _MediaPreviewScreen(mediaPath: path, isVideo: _lastCaptureIsVideo),
       ),
     );
   }
@@ -447,7 +474,8 @@ class _CameraScreenState extends State<CameraScreen>
       return <Size>[baseSize];
     }
 
-    final bool sameSize = baseSize.width == highResSize.width &&
+    final bool sameSize =
+        baseSize.width == highResSize.width &&
         baseSize.height == highResSize.height;
     if (sameSize) {
       return <Size>[baseSize];
@@ -541,7 +569,8 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
     final Size selected = _photoSizeOptions[_selectedPhotoSizeIndex];
-    final bool shouldApply = _appliedPhotoSize == null ||
+    final bool shouldApply =
+        _appliedPhotoSize == null ||
         _appliedPhotoSize!.width != selected.width ||
         _appliedPhotoSize!.height != selected.height;
     if (!shouldApply) return;
@@ -617,32 +646,6 @@ class _CameraScreenState extends State<CameraScreen>
     return _selectedAspectRatio == 'Full' || _selectedAspectRatio == '9:16';
   }
 
-  double _watermarkBottomOffset(BuildContext context) {
-    final double safeBottom = MediaQuery.of(context).padding.bottom;
-    const double edgeGap = 10.0;
-    const double controlsHeight = 252.0;
-
-    if (_selectedAspectRatio == '9:16') {
-      return controlsHeight + edgeGap;
-    }
-    return controlsHeight + safeBottom + edgeGap;
-  }
-
-  double _watermarkTargetWidthFactor() {
-    switch (_selectedAspectRatio) {
-      case '1:1':
-        return 0.60;
-      case '3:4':
-        return 0.56;
-      case '9:16':
-        return 0.48;
-      case 'Full':
-        return 0.50;
-      default:
-        return 0.56;
-    }
-  }
-
   Widget _buildModeSelectorBar(BuildContext context, CameraState state) {
     final Widget selector = ShaderMask(
       shaderCallback: (Rect bounds) {
@@ -692,7 +695,8 @@ class _CameraScreenState extends State<CameraScreen>
     if (_isCameraSwitchInProgress) return;
     final DateTime now = DateTime.now();
     if (_lastSwipeCameraSwitchAt != null &&
-        now.difference(_lastSwipeCameraSwitchAt!) < _cameraSwitchSwipeCooldown) {
+        now.difference(_lastSwipeCameraSwitchAt!) <
+            _cameraSwitchSwipeCooldown) {
       return;
     }
 
@@ -766,8 +770,7 @@ class _CameraScreenState extends State<CameraScreen>
 
     final double dy = endY - startY;
     final double velocityY = details.velocity.pixelsPerSecond.dy;
-    final bool distanceOk =
-        dy.abs() >= _singleFingerSwipeDistanceThreshold;
+    final bool distanceOk = dy.abs() >= _singleFingerSwipeDistanceThreshold;
     final bool velocityOk =
         velocityY.abs() >= _singleFingerSwipeVelocityThreshold;
 
@@ -776,6 +779,85 @@ class _CameraScreenState extends State<CameraScreen>
       _closeFlashMenu();
     }
     unawaited(_switchCameraFromSwipe(state));
+  }
+
+  Future<void> _focusPreviewAt(
+    CameraState state,
+    Offset localPosition,
+    Size previewSize, {
+    required bool lock,
+  }) async {
+    if (previewSize.width <= 0 || previewSize.height <= 0) return;
+
+    HapticFeedback.selectionClick();
+    _focusUiTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _focusPoint = localPosition;
+        _focusLocked = lock;
+        _exposureControlVisible = true;
+      });
+    }
+
+    try {
+      final PreviewSize pixelPreviewSize = await state.previewSize(0);
+      final PreviewSize flutterPreviewSize = PreviewSize(
+        width: previewSize.width,
+        height: previewSize.height,
+      );
+      final AndroidFocusSettings androidFocusSettings = AndroidFocusSettings(
+        autoCancelDurationInMillis: lock ? 0 : 5000,
+      );
+
+      await state.when(
+        onPhotoMode: (photoState) => photoState.focusOnPoint(
+          flutterPosition: localPosition,
+          pixelPreviewSize: pixelPreviewSize,
+          flutterPreviewSize: flutterPreviewSize,
+          androidFocusSettings: androidFocusSettings,
+        ),
+        onVideoMode: (videoState) => videoState.focusOnPoint(
+          flutterPosition: localPosition,
+          pixelPreviewSize: pixelPreviewSize,
+          flutterPreviewSize: flutterPreviewSize,
+          androidFocusSettings: androidFocusSettings,
+        ),
+        onVideoRecordingMode: (videoRecState) => videoRecState.focusOnPoint(
+          flutterPosition: localPosition,
+          pixelPreviewSize: pixelPreviewSize,
+          flutterPreviewSize: flutterPreviewSize,
+          androidFocusSettings: androidFocusSettings,
+        ),
+        onPreviewMode: (previewState) => previewState.focusOnPoint(
+          flutterPosition: localPosition,
+          pixelPreviewSize: pixelPreviewSize,
+          flutterPreviewSize: flutterPreviewSize,
+          androidFocusSettings: androidFocusSettings,
+        ),
+      );
+    } catch (_) {
+      // Some devices may reject focus points while the camera is reconfiguring.
+    }
+
+    if (!lock) {
+      _focusUiTimer = Timer(const Duration(seconds: 4), () {
+        if (!mounted || _focusLocked) return;
+        setState(() {
+          _exposureControlVisible = false;
+        });
+      });
+    } else {
+      HapticFeedback.mediumImpact();
+    }
+  }
+
+  void _setBrightness(CameraState state, double value) {
+    final double next = value.clamp(0.0, 1.0).toDouble();
+    setState(() {
+      _brightness = next;
+      _exposureControlVisible = true;
+    });
+    state.sensorConfig.setBrightness(next);
   }
 
   @override
@@ -838,62 +920,61 @@ class _CameraScreenState extends State<CameraScreen>
                             Container(color: Colors.transparent),
                       ),
                     ),
-                    
-                    // Live Watermark Preview Overlay
-                    Positioned(
-                      left: 6,
-                      right: 6,
-                      bottom: _watermarkBottomOffset(context),
-                      child: IgnorePointer(
-                        child: ValueListenableBuilder<WatermarkConfig>(
-                          valueListenable: WatermarkService.configNotifier,
-                          builder: (context, config, child) {
-                            final double screenWidth =
-                                MediaQuery.of(context).size.width;
-                            final DateTime now = DateTime.now();
-                            final Size wmSize = WatermarkPainter.measureSize(
-                              location: _lastKnownLocation,
-                              config: config,
-                              date: now,
-                            );
-                            final ui.Image? mapImage =
-                                WatermarkService.getCachedMapImage(
-                                _lastKnownLocation,
-                                config,
-                              );
-                            return SizedBox(
-                              width: screenWidth - 12.0,
-                              child: FittedBox(
-                                fit: BoxFit.fitWidth,
-                                alignment: Alignment.bottomCenter,
-                                child: CustomPaint(
-                                  size: wmSize,
-                                  painter: WatermarkPainter(
-                                    location: _lastKnownLocation,
-                                    config: config,
-                                    date: now,
-                                    mapImage: mapImage,
-                                  ),
+
+                    Positioned.fill(
+                      bottom: 240,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final Size previewTouchSize = Size(
+                            constraints.maxWidth,
+                            constraints.maxHeight,
+                          );
+
+                          return GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTapDown: (details) {
+                              _closeFlashMenu();
+                              unawaited(
+                                _focusPreviewAt(
+                                  state,
+                                  details.localPosition,
+                                  previewTouchSize,
+                                  lock: false,
                                 ),
-                              ),
-                            );
-                          },
-                        ),
+                              );
+                            },
+                            onLongPressStart: (details) {
+                              _closeFlashMenu();
+                              unawaited(
+                                _focusPreviewAt(
+                                  state,
+                                  details.localPosition,
+                                  previewTouchSize,
+                                  lock: true,
+                                ),
+                              );
+                            },
+                            onScaleStart: (details) =>
+                                _handleZoomScaleStart(details, state),
+                            onScaleUpdate: (details) =>
+                                _handleZoomScaleUpdate(details, state),
+                            onScaleEnd: (details) =>
+                                _handleZoomScaleEnd(details, state),
+                            child: const SizedBox.expand(),
+                          );
+                        },
                       ),
                     ),
 
                     Positioned.fill(
                       bottom: 240,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _closeFlashMenu,
-                        onScaleStart: (details) =>
-                            _handleZoomScaleStart(details, state),
-                        onScaleUpdate: (details) =>
-                            _handleZoomScaleUpdate(details, state),
-                        onScaleEnd: (details) =>
-                            _handleZoomScaleEnd(details, state),
-                        child: const SizedBox.expand(),
+                      child: _FocusExposureOverlay(
+                        point: _focusPoint,
+                        locked: _focusLocked,
+                        visible: _exposureControlVisible,
+                        brightness: _brightness,
+                        onBrightnessChanged: (value) =>
+                            _setBrightness(state, value),
                       ),
                     ),
 
@@ -909,6 +990,7 @@ class _CameraScreenState extends State<CameraScreen>
                         flashMode: state.sensorConfig.flashMode.name,
                         flashMenuOpen: _isFlashMenuOpen,
                         isRecordingVideo: state is VideoRecordingCameraState,
+                        gpsReady: _lastKnownLocation != null,
                         onFlashTap: _toggleFlashMenu,
                         onFlashOffTap: () =>
                             _setFlashMode(state, FlashMode.none),
@@ -1024,9 +1106,14 @@ class _CameraScreenState extends State<CameraScreen>
                                       valueListenable: _selectedModeNotifier,
                                       builder: (context, index, _) {
                                         return ShutterButton(
-                                          isVideoMode: index == 2,
-                                          isRecording: state
-                                              is VideoRecordingCameraState,
+                                          key: ValueKey<String>(
+                                            'shutter-$index-${state.runtimeType}',
+                                          ),
+                                          isVideoMode:
+                                              index == _videoModeIndex,
+                                          isRecording:
+                                              state
+                                                  is VideoRecordingCameraState,
                                           onTap: () => _handleShutterTap(state),
                                         );
                                       },
@@ -1040,9 +1127,7 @@ class _CameraScreenState extends State<CameraScreen>
                               ),
                               _buildModeSelectorBar(context, state),
                               SizedBox(
-                                height: _selectedAspectRatio == '9:16'
-                                    ? 0
-                                    : 5,
+                                height: _selectedAspectRatio == '9:16' ? 0 : 5,
                               ),
                             ],
                           ),
@@ -1326,9 +1411,7 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
             height: compact ? 20 : 26,
             width: double.infinity,
             child: ClipRect(
-              child: CustomPaint(
-                painter: _RulerPainter(zoom: _currentZoom),
-              ),
+              child: CustomPaint(painter: _RulerPainter(zoom: _currentZoom)),
             ),
           ),
           SizedBox(height: compact ? 4 : 6),
@@ -1432,7 +1515,11 @@ class _RulerPainter extends CustomPainter {
       ..strokeWidth = 1.0;
 
     // Regla finita: parte en min zoom de hardware y termina en max zoom.
-    canvas.drawLine(Offset(startX, centerY), Offset(endX, centerY), baseLinePaint);
+    canvas.drawLine(
+      Offset(startX, centerY),
+      Offset(endX, centerY),
+      baseLinePaint,
+    );
 
     const int tickCount = 28;
     for (int i = 0; i <= tickCount; i++) {
@@ -1476,7 +1563,9 @@ class _CircularPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool hasMedia =
-        filePath != null && filePath!.isNotEmpty && File(filePath!).existsSync();
+        filePath != null &&
+        filePath!.isNotEmpty &&
+        File(filePath!).existsSync();
 
     return GestureDetector(
       onTap: onTap,
@@ -1526,13 +1615,175 @@ class _CircularPreview extends StatelessWidget {
 class _MediaPreviewScreen extends StatefulWidget {
   final String mediaPath;
   final bool isVideo;
-  const _MediaPreviewScreen({
-    required this.mediaPath,
-    required this.isVideo,
-  });
+  const _MediaPreviewScreen({required this.mediaPath, required this.isVideo});
 
   @override
   State<_MediaPreviewScreen> createState() => _MediaPreviewScreenState();
+}
+
+class _FocusExposureOverlay extends StatelessWidget {
+  final Offset? point;
+  final bool locked;
+  final bool visible;
+  final double brightness;
+  final ValueChanged<double> onBrightnessChanged;
+
+  const _FocusExposureOverlay({
+    required this.point,
+    required this.locked,
+    required this.visible,
+    required this.brightness,
+    required this.onBrightnessChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Offset? focusPoint = point;
+    if (focusPoint == null) {
+      return const SizedBox.shrink();
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double x = focusPoint.dx.clamp(54.0, constraints.maxWidth - 96.0);
+        final double y = focusPoint.dy.clamp(54.0, constraints.maxHeight - 96.0);
+        final bool sliderOnRight = x < constraints.maxWidth - 122;
+        final double sliderLeft = sliderOnRight ? x + 42 : x - 104;
+        final double sliderTop = (y - 84).clamp(12.0, constraints.maxHeight - 188.0);
+
+        return IgnorePointer(
+          ignoring: !visible,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 180),
+            opacity: visible ? 1 : 0,
+            child: Stack(
+              children: <Widget>[
+                Positioned(
+                  left: x - 31,
+                  top: y - 31,
+                  child: _FocusRing(locked: locked),
+                ),
+                Positioned(
+                  left: sliderLeft,
+                  top: sliderTop,
+                  child: _ExposureSlider(
+                    value: brightness,
+                    locked: locked,
+                    onChanged: onBrightnessChanged,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _FocusRing extends StatelessWidget {
+  final bool locked;
+
+  const _FocusRing({required this.locked});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = locked ? const Color(0xFFFFD54F) : Colors.white;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: 62,
+      height: 62,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color, width: 1.8),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: color.withValues(alpha: 0.28),
+            blurRadius: 18,
+          ),
+        ],
+      ),
+      child: Center(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 160),
+          child: locked
+              ? const Icon(
+                  CupertinoIcons.lock_fill,
+                  key: ValueKey<String>('locked'),
+                  color: Color(0xFFFFD54F),
+                  size: 18,
+                )
+              : Container(
+                  key: const ValueKey<String>('unlocked'),
+                  width: 5,
+                  height: 5,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExposureSlider extends StatelessWidget {
+  final double value;
+  final bool locked;
+  final ValueChanged<double> onChanged;
+
+  const _ExposureSlider({
+    required this.value,
+    required this.locked,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accent = locked ? const Color(0xFFFFD54F) : Colors.white;
+
+    return Container(
+      width: 48,
+      height: 176,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        children: <Widget>[
+          Icon(CupertinoIcons.sun_max_fill, color: accent, size: 18),
+          Expanded(
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: accent,
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
+                  thumbColor: accent,
+                  overlayColor: accent.withValues(alpha: 0.14),
+                  trackHeight: 3,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 8,
+                  ),
+                ),
+                child: Slider(
+                  value: value,
+                  min: 0.0,
+                  max: 1.0,
+                  onChanged: onChanged,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
@@ -1577,9 +1828,7 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
             flags: [268435456],
           ),
           // 5. Modern Photo Picker
-          const AndroidIntent(
-            action: 'android.provider.action.PICK_IMAGES',
-          ),
+          const AndroidIntent(action: 'android.provider.action.PICK_IMAGES'),
         ];
 
         for (final intent in intents) {
@@ -1663,7 +1912,8 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
 
   Widget _buildVideoView() {
     final controller = _videoController;
-    final double controlsBottomInset = MediaQuery.of(context).padding.bottom + 20;
+    final double controlsBottomInset =
+        MediaQuery.of(context).padding.bottom + 20;
     if (controller == null) {
       return const Center(
         child: Text(
@@ -1677,9 +1927,7 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
       future: _videoInitFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
-            child: CupertinoActivityIndicator(radius: 12),
-          );
+          return const Center(child: CupertinoActivityIndicator(radius: 12));
         }
         if (snapshot.hasError || !controller.value.isInitialized) {
           return const Center(

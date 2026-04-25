@@ -15,6 +15,7 @@ class CameraTopBar extends StatelessWidget {
   final String aspectRatio;
   final String resolutionLabel;
   final bool solidBlackBackground;
+  final bool gpsReady;
 
   const CameraTopBar({
     super.key,
@@ -31,6 +32,7 @@ class CameraTopBar extends StatelessWidget {
     this.aspectRatio = '3:4',
     this.resolutionLabel = '--M',
     this.solidBlackBackground = false,
+    this.gpsReady = false,
   });
 
   IconData _getFlashIcon() {
@@ -186,8 +188,8 @@ class CameraTopBar extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 16),
-                        _TopIcon(
-                          icon: CupertinoIcons.settings,
+                        _GpsStatusIcon(
+                          ready: gpsReady,
                           onTap: onSettingsTap,
                           size: 42,
                           iconSize: 22,
@@ -248,6 +250,63 @@ class CameraTopBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GpsStatusIcon extends StatelessWidget {
+  final bool ready;
+  final VoidCallback? onTap;
+  final double size;
+  final double iconSize;
+
+  const _GpsStatusIcon({
+    required this.ready,
+    this.onTap,
+    this.size = 42,
+    this.iconSize = 22,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color statusColor = ready
+        ? const Color(0xFF46F277)
+        : const Color(0xFFFF4D57);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black.withValues(alpha: 0.20),
+              border: Border.all(color: statusColor, width: 1.8),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: statusColor.withValues(alpha: ready ? 0.38 : 0.26),
+                  blurRadius: ready ? 14 : 10,
+                  spreadRadius: ready ? 1 : 0,
+                ),
+              ],
+            ),
+            child: Icon(
+              ready
+                  ? CupertinoIcons.location_solid
+                  : CupertinoIcons.location,
+              color: Colors.white,
+              size: iconSize,
+            ),
+          ),
+        ),
       ),
     );
   }
