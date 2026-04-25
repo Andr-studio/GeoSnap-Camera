@@ -16,6 +16,7 @@ class CameraTopBar extends StatelessWidget {
   final String resolutionLabel;
   final bool solidBlackBackground;
   final bool gpsReady;
+  final String? recordingTimeLabel;
 
   const CameraTopBar({
     super.key,
@@ -33,6 +34,7 @@ class CameraTopBar extends StatelessWidget {
     this.resolutionLabel = '--M',
     this.solidBlackBackground = false,
     this.gpsReady = false,
+    this.recordingTimeLabel,
   });
 
   IconData _getFlashIcon() {
@@ -199,6 +201,18 @@ class CameraTopBar extends StatelessWidget {
                   ),
                 ),
                 Positioned(
+                  top: 0,
+                  left: horizontalContentInset,
+                  height: topRowHeight,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 160),
+                    opacity: recordingTimeLabel == null ? 0 : 1,
+                    child: recordingTimeLabel == null
+                        ? const SizedBox.shrink()
+                        : _RecordingTimerPill(label: recordingTimeLabel!),
+                  ),
+                ),
+                Positioned(
                   top: topRowHeight + flashMenuTopGap,
                   child: IgnorePointer(
                     ignoring: !flashMenuOpen,
@@ -306,6 +320,49 @@ class _GpsStatusIcon extends StatelessWidget {
               size: iconSize,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordingTimerPill extends StatelessWidget {
+  final String label;
+
+  const _RecordingTimerPill({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.34),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 7,
+              height: 7,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFF3B30),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
         ),
       ),
     );

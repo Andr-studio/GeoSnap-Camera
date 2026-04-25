@@ -8,6 +8,7 @@ import 'package:ffmpeg_kit_min_gpl/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_min_gpl/return_code.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_editor/image_editor.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -154,6 +155,7 @@ class WatermarkService {
         location,
         config,
         isLandscape,
+        isVideo,
       );
 
       final Directory extDir = await getTemporaryDirectory();
@@ -176,16 +178,13 @@ class WatermarkService {
         return inputPath;
       }
 
-      final String command =
-          '-y -i "$inputPath" -i "${watermarkFile.path}" '
-          "-filter_complex \"[1:v][0:v]scale2ref=w='main_w*min(iw,ih)/2280':h='main_h*min(iw,ih)/2280'[wm][vid];[vid][wm]overlay=(W-w)/2:H-h-(H*0.02)\" "
-          '-q:v 2 "$outputPath"';
-
-      final session = await FFmpegKit.execute(command);
-      final returnCode = await session.getReturnCode();
-      if (ReturnCode.isSuccess(returnCode)) return outputPath;
-      print('FFMPEG ERROR PHOTO: ${await session.getOutput()}');
-      return inputPath;
+      final String? photoOutputPath = await _applyPhotoWatermarkWithImageEditor(
+        inputPath: inputPath,
+        outputPath: outputPath,
+        watermarkFile: watermarkFile,
+        config: config,
+      );
+      return photoOutputPath ?? inputPath;
     } catch (e) {
       print('WATERMARK EXCEPTION: $e');
       return inputPath;
@@ -290,10 +289,65 @@ class WatermarkService {
     );
   }
 
+  static double _photoOverlayWidthFactor(WatermarkConfig config) {
+    return config.effectiveGlassWidth.clamp(0.42, 0.76).toDouble();
+  }
+
+  static Future<String?> _applyPhotoWatermarkWithImageEditor({
+    required String inputPath,
+    required String outputPath,
+    required File watermarkFile,
+    required WatermarkConfig config,
+  }) async {
+    try {
+      final File inputFile = File(inputPath);
+      final Uint8List photoBytes = await inputFile.readAsBytes();
+      final Uint8List watermarkBytes = await watermarkFile.readAsBytes();
+      final ui.Image photoImage = await _decodeImage(photoBytes);
+      final ui.Image watermarkImage = await _decodeImage(watermarkBytes);
+
+      final int targetWidth =
+          (photoImage.width * _photoOverlayWidthFactor(config)).round();
+      final int targetHeight =
+          (targetWidth * watermarkImage.height / watermarkImage.width).round();
+      final int safeWidth = targetWidth.clamp(1, photoImage.width);
+      final int safeHeight = targetHeight.clamp(1, photoImage.height);
+      final int x = ((photoImage.width - safeWidth) / 2).round();
+      final int y = (photoImage.height - safeHeight - (photoImage.height * 0.02))
+          .round()
+          .clamp(0, photoImage.height - safeHeight);
+
+      final ImageEditorOption option = ImageEditorOption()
+        ..outputFormat = const OutputFormat.jpeg(95)
+        ..addOption(
+          MixImageOption(
+            target: ImageSource.memory(watermarkBytes),
+            x: x,
+            y: y,
+            width: safeWidth,
+            height: safeHeight,
+          ),
+        );
+
+      final Uint8List? result = await ImageEditor.editFileImage(
+        file: inputFile,
+        imageEditorOption: option,
+      );
+      if (result == null || result.isEmpty) return null;
+
+      await File(outputPath).writeAsBytes(result, flush: true);
+      return outputPath;
+    } catch (e) {
+      print('IMAGE_EDITOR PHOTO WATERMARK ERROR: $e');
+      return null;
+    }
+  }
+
   static Future<File> _createWatermarkImage(
     LocationData location,
     WatermarkConfig config,
     bool isLandscape,
+    bool isVideo,
   ) async {
     final DateTime now = DateTime.now();
     final ui.Image? mapImage = await _getOrFetchMapImage(
@@ -302,7 +356,9 @@ class WatermarkService {
       mapType: config.mapType,
     );
 
-    final double baseW = isLandscape ? 1013.0 : WatermarkService.canvasWidth;
+    final double baseW = isVideo && isLandscape
+        ? 1013.0
+        : WatermarkService.canvasWidth;
     final double canvasW = baseW * config.effectiveGlassWidth;
 
     final Size size = WatermarkPainter.measureSize(

@@ -991,6 +991,10 @@ class _CameraScreenState extends State<CameraScreen>
                         flashMenuOpen: _isFlashMenuOpen,
                         isRecordingVideo: state is VideoRecordingCameraState,
                         gpsReady: _lastKnownLocation != null,
+                        recordingTimeLabel:
+                            state is VideoRecordingCameraState
+                                ? _recordingTimeLabel()
+                                : null,
                         onFlashTap: _toggleFlashMenu,
                         onFlashOffTap: () =>
                             _setFlashMode(state, FlashMode.none),
@@ -1026,48 +1030,6 @@ class _CameraScreenState extends State<CameraScreen>
                         },
                       ),
                     ),
-
-                    if (state is VideoRecordingCameraState)
-                      Positioned(
-                        top: MediaQuery.of(context).padding.top + 56,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withAlpha(170),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.red,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _recordingTimeLabel(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 12,
-                                    letterSpacing: 0.4,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
 
                     Positioned(
                       bottom: 0,
