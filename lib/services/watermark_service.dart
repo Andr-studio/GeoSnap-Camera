@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_editor/image_editor.dart';
 import 'package:intl/intl.dart';
+import 'package:native_exif/native_exif.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -183,6 +184,7 @@ class WatermarkService {
         outputPath: outputPath,
         watermarkFile: watermarkFile,
         config: config,
+        location: location,
       );
       return photoOutputPath ?? inputPath;
     } catch (e) {
@@ -298,6 +300,7 @@ class WatermarkService {
     required String outputPath,
     required File watermarkFile,
     required WatermarkConfig config,
+    required LocationData location,
   }) async {
     try {
       final File inputFile = File(inputPath);
@@ -336,10 +339,60 @@ class WatermarkService {
       if (result == null || result.isEmpty) return null;
 
       await File(outputPath).writeAsBytes(result, flush: true);
+      await _writePhotoExif(
+        sourcePath: inputPath,
+        outputPath: outputPath,
+        location: location,
+      );
       return outputPath;
     } catch (e) {
       print('IMAGE_EDITOR PHOTO WATERMARK ERROR: $e');
       return null;
+    }
+  }
+
+  static Future<void> _writePhotoExif({
+    required String sourcePath,
+    required String outputPath,
+    required LocationData location,
+  }) async {
+    Exif? sourceExif;
+    Exif? outputExif;
+    try {
+      sourceExif = await Exif.fromPath(sourcePath);
+      outputExif = await Exif.fromPath(outputPath);
+
+      final Map<String, Object> values = <String, Object>{};
+      final Map<String, Object>? sourceAttributes =
+          await sourceExif.getAttributes();
+      if (sourceAttributes != null) {
+        for (final MapEntry<String, Object> entry
+            in sourceAttributes.entries) {
+          final Object value = entry.value;
+          if (value is String) {
+            values[entry.key] = value;
+          }
+        }
+      }
+
+      final DateFormat exifDateFormat = DateFormat('yyyy:MM:dd HH:mm:ss');
+      values['DateTimeOriginal'] = values['DateTimeOriginal'] ??
+          exifDateFormat.format(DateTime.now());
+      values['DateTimeDigitized'] = values['DateTimeDigitized'] ??
+          values['DateTimeOriginal']!;
+      values['Orientation'] = '1';
+      values['GPSLatitude'] = location.latitude;
+      values['GPSLongitude'] = location.longitude;
+      values['GPSLatitudeRef'] = location.latitude < 0 ? 'S' : 'N';
+      values['GPSLongitudeRef'] = location.longitude < 0 ? 'W' : 'E';
+      values['GPSProcessingMethod'] = 'GPS';
+
+      await outputExif.writeAttributes(values);
+    } catch (e) {
+      print('NATIVE_EXIF PHOTO METADATA ERROR: $e');
+    } finally {
+      await sourceExif?.close();
+      await outputExif?.close();
     }
   }
 
