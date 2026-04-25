@@ -20,11 +20,7 @@ class PermissionService {
     bool storageGranted = statuses[3].isGranted || statuses[3].isLimited || 
                          statuses[4].isGranted || statuses[4].isLimited;
 
-    print('DEBUG - Permission Status:');
-    print('Camera: $cameraGranted');
-    print('Micro: $micGranted');
-    print('Location: $locationGranted');
-    print('Storage/Photos: $storageGranted');
+
 
     return cameraGranted && micGranted && locationGranted && storageGranted;
   }
@@ -49,11 +45,7 @@ class PermissionService {
                          (statuses[Permission.videos]?.isGranted ?? false) ||
                          (statuses[Permission.videos]?.isLimited ?? false);
 
-    print('DEBUG - Request Results:');
-    print('Camera: $cameraGranted');
-    print('Micro: $micGranted');
-    print('Location: $locationGranted');
-    print('Storage/Photos: $storageGranted');
+
 
     return cameraGranted && micGranted && locationGranted && storageGranted;
   }

@@ -72,7 +72,6 @@ class _CameraScreenState extends State<CameraScreen>
   double _brightness = 0.5;
   double _iconRotationTurns = 0.0;
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
-  Stopwatch? _totalCaptureStopwatch;
   static const double _defaultMegapixels = 12.0;
   static const double _highResMegapixelsThreshold = 40.0;
   static const Duration _shutterDebounce = Duration(milliseconds: 220);
@@ -256,7 +255,6 @@ class _CameraScreenState extends State<CameraScreen>
     }
     _lastShutterTapAt = now;
     _isCaptureActionInProgress = true;
-    _totalCaptureStopwatch = Stopwatch()..start();
 
     try {
       await _applyCameraHardwareMode(state);
@@ -264,12 +262,7 @@ class _CameraScreenState extends State<CameraScreen>
 
       if (wantsVideo) {
         if (state is VideoRecordingCameraState) {
-          final sw = Stopwatch()..start();
           await state.stopRecording();
-          sw.stop();
-          print(
-            'PERF - Tiempo de guardado de video: ${sw.elapsedMilliseconds}ms',
-          );
           _stopRecordingTimer();
         } else if (state is VideoCameraState) {
           await state.startRecording();
@@ -279,12 +272,7 @@ class _CameraScreenState extends State<CameraScreen>
         }
       } else {
         if (state is PhotoCameraState) {
-          final sw = Stopwatch()..start();
           await state.takePhoto();
-          sw.stop();
-          print(
-            'PERF - Tiempo de captura de foto: ${sw.elapsedMilliseconds}ms',
-          );
         } else if (state is VideoRecordingCameraState) {
           await state.stopRecording();
           _stopRecordingTimer();
@@ -362,15 +350,10 @@ class _CameraScreenState extends State<CameraScreen>
     LocationData? loc = _lastKnownLocation;
 
     if (loc != null) {
-      final sw = Stopwatch()..start();
       path = await WatermarkService.applyWatermark(
         path,
         mediaCapture.isVideo,
         loc,
-      );
-      sw.stop();
-      print(
-        'PERF - Tiempo de pegado de marca de agua: ${sw.elapsedMilliseconds}ms',
       );
       if (mounted) {
         setState(() {
@@ -387,14 +370,6 @@ class _CameraScreenState extends State<CameraScreen>
       }
     } catch (_) {
       // Keep capture flow resilient if gallery save fails on specific devices.
-    }
-
-    if (_totalCaptureStopwatch != null) {
-      _totalCaptureStopwatch!.stop();
-      print(
-        'PERF - Tiempo TOTAL desde botón hasta guardado final: ${_totalCaptureStopwatch!.elapsedMilliseconds}ms',
-      );
-      _totalCaptureStopwatch = null;
     }
   }
 

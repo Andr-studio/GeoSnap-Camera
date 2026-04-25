@@ -175,7 +175,6 @@ class WatermarkService {
         final session = await FFmpegKit.execute(command);
         final returnCode = await session.getReturnCode();
         if (ReturnCode.isSuccess(returnCode)) return outputPath;
-        print('FFMPEG ERROR VIDEO: ${await session.getOutput()}');
         return inputPath;
       }
 
@@ -188,7 +187,6 @@ class WatermarkService {
       );
       return photoOutputPath ?? inputPath;
     } catch (e) {
-      print('WATERMARK EXCEPTION: $e');
       return inputPath;
     }
   }
@@ -346,7 +344,6 @@ class WatermarkService {
       );
       return outputPath;
     } catch (e) {
-      print('IMAGE_EDITOR PHOTO WATERMARK ERROR: $e');
       return null;
     }
   }
@@ -389,7 +386,7 @@ class WatermarkService {
 
       await outputExif.writeAttributes(values);
     } catch (e) {
-      print('NATIVE_EXIF PHOTO METADATA ERROR: $e');
+      // Ignore EXIF errors to avoid crashing or leaking data
     } finally {
       await sourceExif?.close();
       await outputExif?.close();
