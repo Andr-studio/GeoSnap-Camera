@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:sensors_plus/sensors_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:geosnap_cam/services/gps_service.dart';
 import 'package:geosnap_cam/services/watermark_service.dart';
@@ -57,6 +58,7 @@ class _CameraScreenState extends State<CameraScreen>
   DateTime? _lastShutterTapAt;
   Timer? _recordingTimer;
   Timer? _focusUiTimer;
+  Timer? _focusLockTimer;
   Duration _recordingElapsed = Duration.zero;
   bool _galleryAccessChecked = false;
   bool _galleryAccessGranted = false;
@@ -65,8 +67,11 @@ class _CameraScreenState extends State<CameraScreen>
   bool _gpsReadyHapticPlayed = false;
   Offset? _focusPoint;
   bool _focusLocked = false;
+  bool _focusIndicatorVisible = false;
   bool _exposureControlVisible = false;
   double _brightness = 0.5;
+  double _iconRotationTurns = 0.0;
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
   Stopwatch? _totalCaptureStopwatch;
   static const double _defaultMegapixels = 12.0;
   static const double _highResMegapixelsThreshold = 40.0;
@@ -76,6 +81,7 @@ class _CameraScreenState extends State<CameraScreen>
   static const Duration _cameraSwitchSwipeCooldown = Duration(
     milliseconds: 700,
   );
+  static const Duration _focusLockPressDuration = Duration(seconds: 1);
   static const String _galleryAlbumName = 'GeoSnap';
   List<Size> _photoSizeOptions = <Size>[];
   int _selectedPhotoSizeIndex = -1;
@@ -101,6 +107,7 @@ class _CameraScreenState extends State<CameraScreen>
     );
 
     _lastHapticPosition = _selectedModeNotifier.value.toDouble();
+    _startIconOrientationTracking();
   }
 
   @override
@@ -108,6 +115,8 @@ class _CameraScreenState extends State<CameraScreen>
     WidgetsBinding.instance.removeObserver(this);
     _recordingTimer?.cancel();
     _focusUiTimer?.cancel();
+    _focusLockTimer?.cancel();
+    _accelerometerSubscription?.cancel();
     _modePageController.dispose();
     _bottomPageController.dispose();
     _pinchExpandNotifier.dispose();
@@ -138,6 +147,29 @@ class _CameraScreenState extends State<CameraScreen>
         setState(() {});
       }
     }
+  }
+
+  void _startIconOrientationTracking() {
+    _accelerometerSubscription =
+        accelerometerEventStream(
+          samplingPeriod: SensorInterval.uiInterval,
+        ).listen((event) {
+          final double x = event.x;
+          final double y = event.y;
+          if (x.abs() < 5.8 && y.abs() < 5.8) return;
+
+          final double nextTurns;
+          if (x.abs() > y.abs()) {
+            nextTurns = x > 0 ? 0.25 : -0.25;
+          } else {
+            nextTurns = y > 0 ? 0.0 : 0.5;
+          }
+
+          if (!mounted || (_iconRotationTurns - nextTurns).abs() < 0.01) return;
+          setState(() {
+            _iconRotationTurns = nextTurns;
+          });
+        });
   }
 
   Future<String> _getPath(String extension) async {
@@ -732,6 +764,7 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
 
+    _cancelFocusLockTimer();
     _isSingleFingerSwipeTracking = false;
     _singleFingerSwipeStartY = null;
     _singleFingerSwipeLastY = null;
@@ -743,10 +776,15 @@ class _CameraScreenState extends State<CameraScreen>
     if (details.pointerCount < 2) {
       if (_isSingleFingerSwipeTracking) {
         _singleFingerSwipeLastY = details.focalPoint.dy;
+        final double? startY = _singleFingerSwipeStartY;
+        if (startY != null && (details.focalPoint.dy - startY).abs() > 10) {
+          _cancelFocusLockTimer();
+        }
       }
       return;
     }
 
+    _cancelFocusLockTimer();
     _pinchExpandNotifier.value++;
     final double zoomDelta = (details.scale - _pinchLastScale) * 0.8;
     _pinchLastScale = details.scale;
@@ -786,6 +824,7 @@ class _CameraScreenState extends State<CameraScreen>
     Offset localPosition,
     Size previewSize, {
     required bool lock,
+    required bool showExposureControl,
   }) async {
     if (previewSize.width <= 0 || previewSize.height <= 0) return;
 
@@ -795,7 +834,8 @@ class _CameraScreenState extends State<CameraScreen>
       setState(() {
         _focusPoint = localPosition;
         _focusLocked = lock;
-        _exposureControlVisible = true;
+        _focusIndicatorVisible = true;
+        _exposureControlVisible = showExposureControl;
       });
     }
 
@@ -843,6 +883,7 @@ class _CameraScreenState extends State<CameraScreen>
       _focusUiTimer = Timer(const Duration(seconds: 4), () {
         if (!mounted || _focusLocked) return;
         setState(() {
+          _focusIndicatorVisible = false;
           _exposureControlVisible = false;
         });
       });
@@ -855,9 +896,15 @@ class _CameraScreenState extends State<CameraScreen>
     final double next = value.clamp(0.0, 1.0).toDouble();
     setState(() {
       _brightness = next;
+      _focusIndicatorVisible = true;
       _exposureControlVisible = true;
     });
     state.sensorConfig.setBrightness(next);
+  }
+
+  void _cancelFocusLockTimer() {
+    _focusLockTimer?.cancel();
+    _focusLockTimer = null;
   }
 
   @override
@@ -934,26 +981,33 @@ class _CameraScreenState extends State<CameraScreen>
                             behavior: HitTestBehavior.translucent,
                             onTapDown: (details) {
                               _closeFlashMenu();
+                              _cancelFocusLockTimer();
                               unawaited(
                                 _focusPreviewAt(
                                   state,
                                   details.localPosition,
                                   previewTouchSize,
                                   lock: false,
+                                  showExposureControl: false,
                                 ),
                               );
-                            },
-                            onLongPressStart: (details) {
-                              _closeFlashMenu();
-                              unawaited(
-                                _focusPreviewAt(
-                                  state,
-                                  details.localPosition,
-                                  previewTouchSize,
-                                  lock: true,
-                                ),
+                              _focusLockTimer = Timer(
+                                _focusLockPressDuration,
+                                () {
+                                  unawaited(
+                                    _focusPreviewAt(
+                                      state,
+                                      details.localPosition,
+                                      previewTouchSize,
+                                      lock: true,
+                                      showExposureControl: true,
+                                    ),
+                                  );
+                                },
                               );
                             },
+                            onTapUp: (_) => _cancelFocusLockTimer(),
+                            onTapCancel: _cancelFocusLockTimer,
                             onScaleStart: (details) =>
                                 _handleZoomScaleStart(details, state),
                             onScaleUpdate: (details) =>
@@ -971,7 +1025,8 @@ class _CameraScreenState extends State<CameraScreen>
                       child: _FocusExposureOverlay(
                         point: _focusPoint,
                         locked: _focusLocked,
-                        visible: _exposureControlVisible,
+                        visible: _focusIndicatorVisible,
+                        exposureVisible: _exposureControlVisible,
                         brightness: _brightness,
                         onBrightnessChanged: (value) =>
                             _setBrightness(state, value),
@@ -991,10 +1046,10 @@ class _CameraScreenState extends State<CameraScreen>
                         flashMenuOpen: _isFlashMenuOpen,
                         isRecordingVideo: state is VideoRecordingCameraState,
                         gpsReady: _lastKnownLocation != null,
-                        recordingTimeLabel:
-                            state is VideoRecordingCameraState
-                                ? _recordingTimeLabel()
-                                : null,
+                        recordingTimeLabel: state is VideoRecordingCameraState
+                            ? _recordingTimeLabel()
+                            : null,
+                        iconRotationTurns: _iconRotationTurns,
                         onFlashTap: _toggleFlashMenu,
                         onFlashOffTap: () =>
                             _setFlashMode(state, FlashMode.none),
@@ -1050,6 +1105,7 @@ class _CameraScreenState extends State<CameraScreen>
                                 sensorConfig: state.sensorConfig,
                                 pinchExpandNotifier: _pinchExpandNotifier,
                                 compactMode: _selectedAspectRatio == '9:16',
+                                iconRotationTurns: _iconRotationTurns,
                               ),
                               Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -1063,6 +1119,7 @@ class _CameraScreenState extends State<CameraScreen>
                                       onTap: _openLastCapturePreview,
                                       filePath: _lastCapturePath,
                                       isVideo: _lastCaptureIsVideo,
+                                      iconRotationTurns: _iconRotationTurns,
                                     ),
                                     ValueListenableBuilder<int>(
                                       valueListenable: _selectedModeNotifier,
@@ -1071,8 +1128,7 @@ class _CameraScreenState extends State<CameraScreen>
                                           key: ValueKey<String>(
                                             'shutter-$index-${state.runtimeType}',
                                           ),
-                                          isVideoMode:
-                                              index == _videoModeIndex,
+                                          isVideoMode: index == _videoModeIndex,
                                           isRecording:
                                               state
                                                   is VideoRecordingCameraState,
@@ -1082,6 +1138,7 @@ class _CameraScreenState extends State<CameraScreen>
                                     ),
                                     _CircularIconButton(
                                       icon: Icons.cached_rounded,
+                                      rotationTurns: _iconRotationTurns,
                                       onTap: () => _switchCamera(state),
                                     ),
                                   ],
@@ -1134,10 +1191,13 @@ class _ZoomSelector extends StatefulWidget {
   final SensorConfig sensorConfig;
   final ValueNotifier<int> pinchExpandNotifier;
   final bool compactMode;
+  final double iconRotationTurns;
+
   const _ZoomSelector({
     required this.sensorConfig,
     required this.pinchExpandNotifier,
     this.compactMode = false,
+    this.iconRotationTurns = 0.0,
   });
   @override
   State<_ZoomSelector> createState() => _ZoomSelectorState();
@@ -1359,12 +1419,17 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
               color: Colors.black.withAlpha(180),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(
-              _zoomLabel(_currentZoom),
-              style: TextStyle(
-                color: Color(0xFFFFD700),
-                fontWeight: FontWeight.bold,
-                fontSize: compact ? 12 : 14,
+            child: AnimatedRotation(
+              turns: widget.iconRotationTurns,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: Text(
+                _zoomLabel(_currentZoom),
+                style: TextStyle(
+                  color: Color(0xFFFFD700),
+                  fontWeight: FontWeight.bold,
+                  fontSize: compact ? 12 : 14,
+                ),
               ),
             ),
           ),
@@ -1418,12 +1483,17 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
           shape: BoxShape.circle,
         ),
         child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.black : Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+          child: AnimatedRotation(
+            turns: widget.iconRotationTurns,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.black : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ),
@@ -1444,12 +1514,17 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
       },
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 15),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? const Color(0xFFFFD700) : Colors.white,
-            fontSize: compact ? 14 : 16,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+        child: AnimatedRotation(
+          turns: widget.iconRotationTurns,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? const Color(0xFFFFD700) : Colors.white,
+              fontSize: compact ? 14 : 16,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            ),
           ),
         ),
       ),
@@ -1517,10 +1592,12 @@ class _CircularPreview extends StatelessWidget {
   final VoidCallback onTap;
   final String? filePath;
   final bool isVideo;
+  final double iconRotationTurns;
   const _CircularPreview({
     required this.onTap,
     this.filePath,
     this.isVideo = false,
+    this.iconRotationTurns = 0.0,
   });
   @override
   Widget build(BuildContext context) {
@@ -1540,34 +1617,39 @@ class _CircularPreview extends StatelessWidget {
           border: Border.all(color: Colors.white30),
         ),
         child: ClipOval(
-          child: hasMedia
-              ? Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (!isVideo)
-                      Image.file(
-                        File(filePath!),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Center(
+          child: AnimatedRotation(
+            turns: iconRotationTurns,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: hasMedia
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (!isVideo)
+                        Image.file(
+                          File(filePath!),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(
+                              CupertinoIcons.photo,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        )
+                      else
+                        Container(color: Colors.black45),
+                      if (isVideo)
+                        const Center(
                           child: Icon(
-                            CupertinoIcons.photo,
-                            color: Colors.white54,
+                            CupertinoIcons.play_fill,
+                            color: Colors.white,
+                            size: 18,
                           ),
                         ),
-                      )
-                    else
-                      Container(color: Colors.black45),
-                    if (isVideo)
-                      const Center(
-                        child: Icon(
-                          CupertinoIcons.play_fill,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                      ),
-                  ],
-                )
-              : const Icon(CupertinoIcons.photo, color: Colors.white54),
+                    ],
+                  )
+                : const Icon(CupertinoIcons.photo, color: Colors.white54),
+          ),
         ),
       ),
     );
@@ -1587,6 +1669,7 @@ class _FocusExposureOverlay extends StatelessWidget {
   final Offset? point;
   final bool locked;
   final bool visible;
+  final bool exposureVisible;
   final double brightness;
   final ValueChanged<double> onBrightnessChanged;
 
@@ -1594,6 +1677,7 @@ class _FocusExposureOverlay extends StatelessWidget {
     required this.point,
     required this.locked,
     required this.visible,
+    required this.exposureVisible,
     required this.brightness,
     required this.onBrightnessChanged,
   });
@@ -1608,13 +1692,19 @@ class _FocusExposureOverlay extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double x = focusPoint.dx.clamp(54.0, constraints.maxWidth - 96.0);
-        final double y = focusPoint.dy.clamp(54.0, constraints.maxHeight - 96.0);
+        final double y = focusPoint.dy.clamp(
+          54.0,
+          constraints.maxHeight - 96.0,
+        );
         final bool sliderOnRight = x < constraints.maxWidth - 122;
         final double sliderLeft = sliderOnRight ? x + 42 : x - 104;
-        final double sliderTop = (y - 84).clamp(12.0, constraints.maxHeight - 188.0);
+        final double sliderTop = (y - 84).clamp(
+          12.0,
+          constraints.maxHeight - 188.0,
+        );
 
         return IgnorePointer(
-          ignoring: !visible,
+          ignoring: !exposureVisible,
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 180),
             opacity: visible ? 1 : 0,
@@ -1628,10 +1718,17 @@ class _FocusExposureOverlay extends StatelessWidget {
                 Positioned(
                   left: sliderLeft,
                   top: sliderTop,
-                  child: _ExposureSlider(
-                    value: brightness,
-                    locked: locked,
-                    onChanged: onBrightnessChanged,
+                  child: IgnorePointer(
+                    ignoring: !exposureVisible,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 160),
+                      opacity: exposureVisible ? 1 : 0,
+                      child: _ExposureSlider(
+                        value: brightness,
+                        locked: locked,
+                        onChanged: onBrightnessChanged,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -1661,10 +1758,7 @@ class _FocusRing extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color, width: 1.8),
         boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: color.withValues(alpha: 0.28),
-            blurRadius: 18,
-          ),
+          BoxShadow(color: color.withValues(alpha: 0.28), blurRadius: 18),
         ],
       ),
       child: Center(
@@ -1917,7 +2011,13 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
 class _CircularIconButton extends StatefulWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _CircularIconButton({required this.icon, required this.onTap});
+  final double rotationTurns;
+
+  const _CircularIconButton({
+    required this.icon,
+    required this.onTap,
+    this.rotationTurns = 0.0,
+  });
 
   @override
   State<_CircularIconButton> createState() => _CircularIconButtonState();
@@ -1960,7 +2060,12 @@ class _CircularIconButtonState extends State<_CircularIconButton>
           turns: Tween(begin: 0.0, end: 1.0).animate(
             CurvedAnimation(parent: _controller, curve: Curves.easeInOutBack),
           ),
-          child: Icon(widget.icon, color: Colors.white, size: 28),
+          child: AnimatedRotation(
+            turns: widget.rotationTurns,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: Icon(widget.icon, color: Colors.white, size: 28),
+          ),
         ),
       ),
     );

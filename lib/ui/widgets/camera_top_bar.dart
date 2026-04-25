@@ -17,6 +17,7 @@ class CameraTopBar extends StatelessWidget {
   final bool solidBlackBackground;
   final bool gpsReady;
   final String? recordingTimeLabel;
+  final double iconRotationTurns;
 
   const CameraTopBar({
     super.key,
@@ -35,6 +36,7 @@ class CameraTopBar extends StatelessWidget {
     this.solidBlackBackground = false,
     this.gpsReady = false,
     this.recordingTimeLabel,
+    this.iconRotationTurns = 0.0,
   });
 
   IconData _getFlashIcon() {
@@ -60,6 +62,7 @@ class CameraTopBar extends StatelessWidget {
     required IconData icon,
     required bool selected,
     required VoidCallback onTap,
+    required double rotationTurns,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -68,10 +71,15 @@ class CameraTopBar extends StatelessWidget {
         width: 56,
         height: 44,
         child: Center(
-          child: Icon(
-            icon,
-            color: selected ? const Color(0xFFFFD54F) : Colors.white,
-            size: 24,
+          child: AnimatedRotation(
+            turns: rotationTurns,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: Icon(
+              icon,
+              color: selected ? const Color(0xFFFFD54F) : Colors.white,
+              size: 24,
+            ),
           ),
         ),
       ),
@@ -100,17 +108,14 @@ class CameraTopBar extends StatelessWidget {
     final BoxDecoration topRowDecoration = solidBlackBackground
         ? const BoxDecoration(color: Colors.black)
         : isFullRatio
-            ? const BoxDecoration(color: Colors.transparent)
-            : const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black45,
-                    Colors.transparent,
-                  ],
-                ),
-              );
+        ? const BoxDecoration(color: Colors.transparent)
+        : const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.black45, Colors.transparent],
+            ),
+          );
 
     return Container(
       decoration: outerDecoration,
@@ -135,129 +140,146 @@ class CameraTopBar extends StatelessWidget {
                 child: Stack(
                   alignment: Alignment.topCenter,
                   children: [
-                Container(
-                  height: topRowHeight,
-                  decoration: topRowDecoration,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: horizontalContentInset,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        _TopIcon(
-                          icon: _getFlashIcon(),
-                          onTap: onFlashTap,
-                          size: 42,
-                          iconSize: 22,
+                    Container(
+                      height: topRowHeight,
+                      decoration: topRowDecoration,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: horizontalContentInset,
                         ),
-                        const SizedBox(width: 16),
-                        GestureDetector(
-                          onTap: onAspectRatioTap,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Colors.white,
-                                width: 1.5,
-                              ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              aspectRatio,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        GestureDetector(
-                          onTap: onResolutionTap,
-                          child: Text(
-                            resolutionLabel,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        _GpsStatusIcon(
-                          ready: gpsReady,
-                          onTap: onSettingsTap,
-                          size: 42,
-                          iconSize: 22,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 0,
-                  left: horizontalContentInset,
-                  height: topRowHeight,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 160),
-                    opacity: recordingTimeLabel == null ? 0 : 1,
-                    child: recordingTimeLabel == null
-                        ? const SizedBox.shrink()
-                        : _RecordingTimerPill(label: recordingTimeLabel!),
-                  ),
-                ),
-                Positioned(
-                  top: topRowHeight + flashMenuTopGap,
-                  child: IgnorePointer(
-                    ignoring: !flashMenuOpen,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 180),
-                      opacity: flashMenuOpen ? 1 : 0,
-                      child: AnimatedSlide(
-                        duration: const Duration(milliseconds: 180),
-                        offset: flashMenuOpen
-                            ? Offset.zero
-                            : const Offset(0, -0.08),
-                        curve: Curves.easeOutCubic,
-                        child: Container(
-                          height: flashMenuHeight,
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF3A3F47),
-                            borderRadius: BorderRadius.circular(28),
-                          ),
                         child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            _flashOption(
-                              icon: CupertinoIcons.bolt_slash_fill,
-                              selected: _isSelected('none'),
-                              onTap: onFlashOffTap,
+                            _TopIcon(
+                              icon: _getFlashIcon(),
+                              onTap: onFlashTap,
+                              size: 42,
+                              iconSize: 22,
+                              rotationTurns: iconRotationTurns,
                             ),
-                            if (!isRecordingVideo)
-                              _flashOption(
-                                icon: CupertinoIcons.bolt_badge_a_fill,
-                                selected: _isSelected('auto'),
-                                onTap: onFlashAutoTap,
+                            const SizedBox(width: 16),
+                            GestureDetector(
+                              onTap: onAspectRatioTap,
+                              child: AnimatedRotation(
+                                turns: iconRotationTurns,
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOutCubic,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 1.5,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    aspectRatio,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            _flashOption(
-                              icon: CupertinoIcons.bolt_fill,
-                              selected: _isSelected('on'),
-                                onTap: onFlashOnTap,
+                            ),
+                            const SizedBox(width: 16),
+                            GestureDetector(
+                              onTap: onResolutionTap,
+                              child: AnimatedRotation(
+                                turns: iconRotationTurns,
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOutCubic,
+                                child: Text(
+                                  resolutionLabel,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
                               ),
-                            ],
+                            ),
+                            const SizedBox(width: 16),
+                            _GpsStatusIcon(
+                              ready: gpsReady,
+                              onTap: onSettingsTap,
+                              size: 42,
+                              iconSize: 22,
+                              rotationTurns: iconRotationTurns,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      left: horizontalContentInset,
+                      height: topRowHeight,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 160),
+                        opacity: recordingTimeLabel == null ? 0 : 1,
+                        child: recordingTimeLabel == null
+                            ? const SizedBox.shrink()
+                            : _RecordingTimerPill(label: recordingTimeLabel!),
+                      ),
+                    ),
+                    Positioned(
+                      top: topRowHeight + flashMenuTopGap,
+                      child: IgnorePointer(
+                        ignoring: !flashMenuOpen,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 180),
+                          opacity: flashMenuOpen ? 1 : 0,
+                          child: AnimatedSlide(
+                            duration: const Duration(milliseconds: 180),
+                            offset: flashMenuOpen
+                                ? Offset.zero
+                                : const Offset(0, -0.08),
+                            curve: Curves.easeOutCubic,
+                            child: Container(
+                              height: flashMenuHeight,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF3A3F47),
+                                borderRadius: BorderRadius.circular(28),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _flashOption(
+                                    icon: CupertinoIcons.bolt_slash_fill,
+                                    selected: _isSelected('none'),
+                                    onTap: onFlashOffTap,
+                                    rotationTurns: iconRotationTurns,
+                                  ),
+                                  if (!isRecordingVideo)
+                                    _flashOption(
+                                      icon: CupertinoIcons.bolt_badge_a_fill,
+                                      selected: _isSelected('auto'),
+                                      onTap: onFlashAutoTap,
+                                      rotationTurns: iconRotationTurns,
+                                    ),
+                                  _flashOption(
+                                    icon: CupertinoIcons.bolt_fill,
+                                    selected: _isSelected('on'),
+                                    onTap: onFlashOnTap,
+                                    rotationTurns: iconRotationTurns,
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ),
                   ],
                 ),
               ),
@@ -274,12 +296,14 @@ class _GpsStatusIcon extends StatelessWidget {
   final VoidCallback? onTap;
   final double size;
   final double iconSize;
+  final double rotationTurns;
 
   const _GpsStatusIcon({
     required this.ready,
     this.onTap,
     this.size = 42,
     this.iconSize = 22,
+    this.rotationTurns = 0.0,
   });
 
   @override
@@ -312,12 +336,15 @@ class _GpsStatusIcon extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(
-              ready
-                  ? CupertinoIcons.location_solid
-                  : CupertinoIcons.location,
-              color: Colors.white,
-              size: iconSize,
+            child: AnimatedRotation(
+              turns: rotationTurns,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: Icon(
+                ready ? CupertinoIcons.location_solid : CupertinoIcons.location,
+                color: Colors.white,
+                size: iconSize,
+              ),
             ),
           ),
         ),
@@ -374,12 +401,14 @@ class _TopIcon extends StatelessWidget {
   final VoidCallback? onTap;
   final double size;
   final double iconSize;
+  final double rotationTurns;
 
   const _TopIcon({
     required this.icon,
     this.onTap,
     this.size = 32,
     this.iconSize = 20,
+    this.rotationTurns = 0.0,
   });
 
   @override
@@ -391,7 +420,12 @@ class _TopIcon extends StatelessWidget {
         width: size,
         height: size,
         child: Center(
-          child: Icon(icon, color: Colors.white, size: iconSize),
+          child: AnimatedRotation(
+            turns: rotationTurns,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: Icon(icon, color: Colors.white, size: iconSize),
+          ),
         ),
       ),
     );
