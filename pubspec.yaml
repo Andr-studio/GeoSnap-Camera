@@ -20,7 +20,7 @@ dependencies:
 
   image_editor: ^1.6.0
   native_exif: ^0.7.0
-  ffmpeg_kit_min_gpl: ^6.0.3+2-LTS
+  ffmpeg_kit_flutter_new: ^4.1.0
 
   
   gal: ^2.3.2

@@ -81,76 +81,36 @@ class GpsService {
       final hasPermission = await requestPermission();
       if (!hasPermission) return null;
 
+      // Reducir accuracy a medium para obtener posición instantánea desde
+      // red/WiFi. High espera señal satelital (3-8 s extra).
       final Position position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 6),
         ),
       );
 
-      String address = '';
-      String city = '';
-      String region = '';
-      String country = '';
-      String countryCode = '';
-      String postalCode = '';
-      try {
-        final List<Placemark> placemarks = await placemarkFromCoordinates(
-          position.latitude,
-          position.longitude,
-        );
-        if (placemarks.isNotEmpty) {
-          final Placemark place = placemarks.first;
-          final List<String> addressParts = <String>[
-            if ((place.street ?? '').trim().isNotEmpty) place.street!.trim(),
-            if ((place.subLocality ?? '').trim().isNotEmpty)
-              place.subLocality!.trim(),
-          ];
-          final List<String> cityParts = <String>[
-            if ((place.locality ?? '').trim().isNotEmpty)
-              place.locality!.trim(),
-            if ((place.subAdministrativeArea ?? '').trim().isNotEmpty)
-              place.subAdministrativeArea!.trim(),
-          ];
-          final String resolvedAddress = addressParts.join(', ');
-          final String resolvedCity = cityParts.join(', ');
-          address = resolvedAddress;
-          city = resolvedCity;
-          region = (place.administrativeArea ?? '').trim();
-          country = (place.country ?? '').trim();
-          countryCode = (place.isoCountryCode ?? '').trim();
-          postalCode = (place.postalCode ?? '').trim();
+      // Paralelizar geocoding y weather: antes era secuencial (1-3 s extra).
+      final results = await Future.wait([
+        _resolveAddress(position.latitude, position.longitude),
+        _fetchWeatherSnapshot(
+          latitude: position.latitude,
+          longitude: position.longitude,
+        ),
+      ]);
 
-          if (address.isEmpty) {
-            final List<String> fallback = <String>[
-              if ((place.name ?? '').trim().isNotEmpty) place.name!.trim(),
-              if ((place.thoroughfare ?? '').trim().isNotEmpty)
-                place.thoroughfare!.trim(),
-            ];
-            address = fallback.join(', ');
-          }
-
-          if (city.isEmpty) {
-            city = region;
-          }
-        }
-      } catch (e) {
-        // Fallback or ignore if geocoding fails
-      }
-
-      final _WeatherSnapshot weather = await _fetchWeatherSnapshot(
-        latitude: position.latitude,
-        longitude: position.longitude,
-      );
+      final _AddressResult addr = results[0] as _AddressResult;
+      final _WeatherSnapshot weather = results[1] as _WeatherSnapshot;
 
       return LocationData(
         latitude: position.latitude,
         longitude: position.longitude,
-        address: address,
-        city: city,
-        region: region,
-        country: country,
-        countryCode: countryCode,
-        postalCode: postalCode,
+        address: addr.address,
+        city: addr.city,
+        region: addr.region,
+        country: addr.country,
+        countryCode: addr.countryCode,
+        postalCode: addr.postalCode,
         timezone: weather.timezone,
         temperatureC: weather.temperatureC,
         windKmh: weather.windKmh,
@@ -158,6 +118,49 @@ class GpsService {
       );
     } catch (e) {
       return null;
+    }
+  }
+
+  Future<_AddressResult> _resolveAddress(double lat, double lon) async {
+    try {
+      final List<Placemark> placemarks = await placemarkFromCoordinates(lat, lon);
+      if (placemarks.isEmpty) return const _AddressResult();
+
+      final Placemark place = placemarks.first;
+      final List<String> addressParts = <String>[
+        if ((place.street ?? '').trim().isNotEmpty) place.street!.trim(),
+        if ((place.subLocality ?? '').trim().isNotEmpty)
+          place.subLocality!.trim(),
+      ];
+      final List<String> cityParts = <String>[
+        if ((place.locality ?? '').trim().isNotEmpty) place.locality!.trim(),
+        if ((place.subAdministrativeArea ?? '').trim().isNotEmpty)
+          place.subAdministrativeArea!.trim(),
+      ];
+      String address = addressParts.join(', ');
+      String city = cityParts.join(', ');
+      final String region = (place.administrativeArea ?? '').trim();
+
+      if (address.isEmpty) {
+        final List<String> fallback = <String>[
+          if ((place.name ?? '').trim().isNotEmpty) place.name!.trim(),
+          if ((place.thoroughfare ?? '').trim().isNotEmpty)
+            place.thoroughfare!.trim(),
+        ];
+        address = fallback.join(', ');
+      }
+      if (city.isEmpty) city = region;
+
+      return _AddressResult(
+        address: address,
+        city: city,
+        region: region,
+        country: (place.country ?? '').trim(),
+        countryCode: (place.isoCountryCode ?? '').trim(),
+        postalCode: (place.postalCode ?? '').trim(),
+      );
+    } catch (_) {
+      return const _AddressResult();
     }
   }
 
@@ -204,6 +207,24 @@ class GpsService {
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
   }
+}
+
+class _AddressResult {
+  final String address;
+  final String city;
+  final String region;
+  final String country;
+  final String countryCode;
+  final String postalCode;
+
+  const _AddressResult({
+    this.address = '',
+    this.city = '',
+    this.region = '',
+    this.country = '',
+    this.countryCode = '',
+    this.postalCode = '',
+  });
 }
 
 class _WeatherSnapshot {
