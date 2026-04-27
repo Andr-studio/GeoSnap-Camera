@@ -3,6 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class PermissionService {
   static const String _onboardingCompleteKey = 'onboarding_complete';
+  final SharedPreferences _prefs;
+
+  PermissionService({required SharedPreferences prefs}) : _prefs = prefs;
 
   /// Check if all mandatory permissions are granted.
   Future<bool> hasAllPermissions() async {
@@ -17,10 +20,11 @@ class PermissionService {
     bool cameraGranted = statuses[0].isGranted;
     bool micGranted = statuses[1].isGranted;
     bool locationGranted = statuses[2].isGranted || statuses[2].isLimited;
-    bool storageGranted = statuses[3].isGranted || statuses[3].isLimited || 
-                         statuses[4].isGranted || statuses[4].isLimited;
-
-
+    bool storageGranted =
+        statuses[3].isGranted ||
+        statuses[3].isLimited ||
+        statuses[4].isGranted ||
+        statuses[4].isLimited;
 
     return cameraGranted && micGranted && locationGranted && storageGranted;
   }
@@ -37,28 +41,29 @@ class PermissionService {
 
     bool cameraGranted = statuses[Permission.camera]?.isGranted ?? false;
     bool micGranted = statuses[Permission.microphone]?.isGranted ?? false;
-    bool locationGranted = statuses[Permission.locationWhenInUse]?.isGranted ?? 
-                          statuses[Permission.locationWhenInUse]?.isLimited ?? false;
-    
-    bool storageGranted = (statuses[Permission.photos]?.isGranted ?? false) ||
-                         (statuses[Permission.photos]?.isLimited ?? false) ||
-                         (statuses[Permission.videos]?.isGranted ?? false) ||
-                         (statuses[Permission.videos]?.isLimited ?? false);
+    bool locationGranted =
+        statuses[Permission.locationWhenInUse]?.isGranted ??
+        statuses[Permission.locationWhenInUse]?.isLimited ??
+        false;
 
+    bool storageGranted =
+        (statuses[Permission.photos]?.isGranted ?? false) ||
+        (statuses[Permission.photos]?.isLimited ?? false) ||
+        (statuses[Permission.videos]?.isGranted ?? false) ||
+        (statuses[Permission.videos]?.isLimited ?? false);
 
-
-    return cameraGranted && micGranted && locationGranted && storageGranted;
+    final bool granted =
+        cameraGranted && micGranted && locationGranted && storageGranted;
+    return granted || await hasAllPermissions();
   }
 
   /// Check if the user has already seen and accepted the initial permission screen.
   Future<bool> isOnboardingComplete() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_onboardingCompleteKey) ?? false;
+    return _prefs.getBool(_onboardingCompleteKey) ?? false;
   }
 
   /// Mark the onboarding as complete.
   Future<void> setOnboardingComplete() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_onboardingCompleteKey, true);
+    await _prefs.setBool(_onboardingCompleteKey, true);
   }
 }

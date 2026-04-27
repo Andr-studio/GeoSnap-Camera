@@ -1,20 +1,21 @@
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import '../../core/di/service_locator.dart';
 import '../../core/services/permission_service.dart';
-import 'camera_screen.dart';
 
 class PermissionScreen extends StatefulWidget {
-  final VoidCallback onGranted;
+  final VoidCallback? onGranted;
+  final Widget? grantedScreen;
 
-  const PermissionScreen({super.key, required this.onGranted});
+  const PermissionScreen({super.key, this.onGranted, this.grantedScreen});
 
   @override
   State<PermissionScreen> createState() => _PermissionScreenState();
 }
 
 class _PermissionScreenState extends State<PermissionScreen> {
-  final PermissionService _permissionService = PermissionService();
+  final PermissionService _permissionService = appLocator<PermissionService>();
   bool _isRequesting = false;
 
   Future<void> _handlePermissions() async {
@@ -28,14 +29,22 @@ class _PermissionScreenState extends State<PermissionScreen> {
         await _permissionService.setOnboardingComplete();
         if (mounted) {
           setState(() => _isRequesting = false);
-          
-          // Force direct navigation as a fail-safe
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const CameraScreen()),
-          );
-          
-          // Also call the callback for consistency
-          widget.onGranted();
+          final Widget? grantedScreen = widget.grantedScreen;
+          if (grantedScreen != null) {
+            Navigator.of(context).pushReplacement(
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) =>
+                    grantedScreen,
+                transitionsBuilder:
+                    (context, animation, secondaryAnimation, child) {
+                      return FadeTransition(opacity: animation, child: child);
+                    },
+                transitionDuration: const Duration(milliseconds: 180),
+              ),
+            );
+          } else {
+            widget.onGranted?.call();
+          }
         }
       } else {
         if (mounted) {
@@ -45,7 +54,8 @@ class _PermissionScreenState extends State<PermissionScreen> {
             builder: (context) => CupertinoAlertDialog(
               title: const Text('Permisos Requeridos'),
               content: const Text(
-                  'GeoSnap Cam necesita estos permisos para funcionar correctamente. Por favor, acéptalos en la configuración.'),
+                'GeoSnap Cam necesita estos permisos para funcionar correctamente. Por favor, acéptalos en la configuración.',
+              ),
               actions: [
                 CupertinoDialogAction(
                   child: const Text('Entendido'),
@@ -106,7 +116,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                     ),
                   ),
                   const SizedBox(height: 48),
-                  
+
                   // Permission Cards
                   Expanded(
                     child: ListView(
@@ -115,7 +125,8 @@ class _PermissionScreenState extends State<PermissionScreen> {
                         _PermissionCard(
                           icon: CupertinoIcons.camera_fill,
                           title: 'Cámara',
-                          description: 'Para capturar fotos y videos impresionantes.',
+                          description:
+                              'Para capturar fotos y videos impresionantes.',
                         ),
                         _PermissionCard(
                           icon: CupertinoIcons.mic_fill,
@@ -125,19 +136,21 @@ class _PermissionScreenState extends State<PermissionScreen> {
                         _PermissionCard(
                           icon: CupertinoIcons.location_fill,
                           title: 'Ubicación Precisa',
-                          description: 'Para geolocalizar tus capturas automáticamente.',
+                          description:
+                              'Para geolocalizar tus capturas automáticamente.',
                         ),
                         _PermissionCard(
                           icon: CupertinoIcons.photo_fill,
                           title: 'Galería',
-                          description: 'Para guardar y gestionar tus creaciones.',
+                          description:
+                              'Para guardar y gestionar tus creaciones.',
                         ),
                       ],
                     ),
                   ),
-                  
+
                   const SizedBox(height: 24),
-                  
+
                   // Premium Button
                   Padding(
                     padding: const EdgeInsets.only(bottom: 32.0),

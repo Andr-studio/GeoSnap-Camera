@@ -100,15 +100,26 @@ class WatermarkConfig {
 }
 
 class WatermarkService {
-  static final ValueNotifier<WatermarkConfig> configNotifier = ValueNotifier(
+  final SharedPreferences _prefs;
+  final http.Client _httpClient;
+
+  WatermarkService({
+    required SharedPreferences prefs,
+    required http.Client httpClient,
+  }) : _prefs = prefs,
+       _httpClient = httpClient;
+
+  final ValueNotifier<WatermarkConfig> configNotifier = ValueNotifier(
     WatermarkConfig(),
   );
 
   static const double canvasWidth = 760.0;
   static const int _mapZoom = 16;
-  static final Map<String, ui.Image> _mapCache = <String, ui.Image>{};
+  static const int _mapTileSize = 256;
+  static const int _mapViewportSize = 512;
+  final Map<String, ui.Image> _mapCache = <String, ui.Image>{};
 
-  static Future<String> applyWatermark(
+  Future<String> applyWatermark(
     String inputPath,
     bool isVideo,
     LocationData location,
@@ -191,8 +202,8 @@ class WatermarkService {
     }
   }
 
-  static Future<WatermarkConfig> getConfig() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+  Future<WatermarkConfig> getConfig() async {
+    final SharedPreferences prefs = _prefs;
     final String mapType =
         prefs.getString('wm_mapType') ?? WatermarkMapType.standard;
     final double titleScale = prefs.getDouble('wm_titleScale') ?? 0.55;
@@ -237,8 +248,8 @@ class WatermarkService {
     return config;
   }
 
-  static Future<void> saveConfig(WatermarkConfig config) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+  Future<void> saveConfig(WatermarkConfig config) async {
+    final SharedPreferences prefs = _prefs;
     await prefs.setBool('wm_showDate', config.showDate);
     await prefs.setBool('wm_showAddress', config.showAddress);
     await prefs.setBool('wm_showCityCoords', config.showCityCoords);
@@ -262,20 +273,17 @@ class WatermarkService {
     configNotifier.value = config;
   }
 
-  static ui.Image? getCachedMapImage(
-    LocationData? location,
-    WatermarkConfig config,
-  ) {
+  ui.Image? getCachedMapImage(LocationData? location, WatermarkConfig config) {
     if (location == null) return null;
-    final _TileCoord tile = _latLonToTile(
+    final _MapTileLocation tile = _latLonToTileLocation(
       location.latitude,
       location.longitude,
       _mapZoom,
     );
-    return _mapCache[_cacheKey(config.mapType, tile.x, tile.y, _mapZoom)];
+    return _mapCache[_cacheKey(config.mapType, tile, _mapZoom)];
   }
 
-  static Future<void> prewarmWatermarkAssets(
+  Future<void> prewarmWatermarkAssets(
     LocationData? location,
     WatermarkConfig config,
   ) async {
@@ -391,7 +399,7 @@ class WatermarkService {
     }
   }
 
-  static Future<File> _createWatermarkImage(
+  Future<File> _createWatermarkImage(
     LocationData location,
     WatermarkConfig config,
     bool isLandscape,
@@ -451,29 +459,26 @@ class WatermarkService {
     return imgFile;
   }
 
-  static Future<ui.Image?> _getOrFetchMapImage({
+  Future<ui.Image?> _getOrFetchMapImage({
     required double latitude,
     required double longitude,
     required String mapType,
   }) async {
-    final _TileCoord tile = _latLonToTile(latitude, longitude, _mapZoom);
-    final String key = _cacheKey(mapType, tile.x, tile.y, _mapZoom);
+    final _MapTileLocation tile = _latLonToTileLocation(
+      latitude,
+      longitude,
+      _mapZoom,
+    );
+    final String key = _cacheKey(mapType, tile, _mapZoom);
     final ui.Image? cached = _mapCache[key];
     if (cached != null) return cached;
 
     try {
-      final Uri uri = _buildTileUri(
+      final ui.Image? image = await _buildCenteredMapImage(
         mapType: mapType,
-        x: tile.x,
-        y: tile.y,
-        z: _mapZoom,
+        center: tile,
       );
-      final http.Response response = await http.get(uri);
-      if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
-        return null;
-      }
-
-      final ui.Image image = await _decodeImage(response.bodyBytes);
+      if (image == null) return null;
       _mapCache[key] = image;
 
       if (_mapCache.length > 60) {
@@ -486,8 +491,83 @@ class WatermarkService {
     }
   }
 
-  static String _cacheKey(String mapType, int x, int y, int z) {
-    return '$mapType:$z:$x:$y';
+  Future<ui.Image?> _buildCenteredMapImage({
+    required String mapType,
+    required _MapTileLocation center,
+  }) async {
+    final double viewportHalf = _mapViewportSize / 2.0;
+    final int firstTileX = ((center.worldPixelX - viewportHalf) / _mapTileSize)
+        .floor();
+    final int lastTileX = ((center.worldPixelX + viewportHalf) / _mapTileSize)
+        .floor();
+    final int firstTileY = ((center.worldPixelY - viewportHalf) / _mapTileSize)
+        .floor();
+    final int lastTileY = ((center.worldPixelY + viewportHalf) / _mapTileSize)
+        .floor();
+    final double originWorldX = center.worldPixelX - viewportHalf;
+    final double originWorldY = center.worldPixelY - viewportHalf;
+
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    bool drewAnyTile = false;
+
+    for (int x = firstTileX; x <= lastTileX; x++) {
+      for (int y = firstTileY; y <= lastTileY; y++) {
+        if (y < 0 || y > center.maxTile) continue;
+
+        final int wrappedX = _wrapTileX(x, center.maxTile + 1);
+        final ui.Image? tileImage = await _fetchTileImage(
+          mapType: mapType,
+          x: wrappedX,
+          y: y,
+          z: _mapZoom,
+        );
+        if (tileImage == null) continue;
+
+        final double dx = (x * _mapTileSize) - originWorldX;
+        final double dy = (y * _mapTileSize) - originWorldY;
+        final Rect dst = Rect.fromLTWH(
+          dx,
+          dy,
+          _mapTileSize.toDouble(),
+          _mapTileSize.toDouble(),
+        );
+        final Rect src = Rect.fromLTWH(
+          0,
+          0,
+          tileImage.width.toDouble(),
+          tileImage.height.toDouble(),
+        );
+        canvas.drawImageRect(tileImage, src, dst, Paint());
+        drewAnyTile = true;
+      }
+    }
+
+    final ui.Picture picture = recorder.endRecording();
+    if (!drewAnyTile) return null;
+    return picture.toImage(_mapViewportSize, _mapViewportSize);
+  }
+
+  Future<ui.Image?> _fetchTileImage({
+    required String mapType,
+    required int x,
+    required int y,
+    required int z,
+  }) async {
+    final Uri uri = _buildTileUri(mapType: mapType, x: x, y: y, z: z);
+    final http.Response response = await _httpClient.get(uri);
+    if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
+      return null;
+    }
+    return _decodeImage(response.bodyBytes);
+  }
+
+  static int _wrapTileX(int x, int tileCount) {
+    return ((x % tileCount) + tileCount) % tileCount;
+  }
+
+  static String _cacheKey(String mapType, _MapTileLocation tile, int z) {
+    return '$mapType:$z:${tile.worldPixelX.round()}:${tile.worldPixelY.round()}';
   }
 
   static Uri _buildTileUri({
@@ -509,21 +589,30 @@ class WatermarkService {
     }
   }
 
-  static _TileCoord _latLonToTile(double lat, double lon, int zoom) {
+  static _MapTileLocation _latLonToTileLocation(
+    double lat,
+    double lon,
+    int zoom,
+  ) {
     final double clampedLat = lat.clamp(-85.0511, 85.0511);
     final double n = math.pow(2.0, zoom).toDouble();
-    final int x = (((lon + 180.0) / 360.0) * n).floor();
+    final double worldSize = n * _mapTileSize;
+    final double worldPixelX = ((lon + 180.0) / 360.0) * worldSize;
     final double latRad = clampedLat * math.pi / 180.0;
-    final int y =
+    final double worldPixelY =
         ((1.0 -
-                    math.log(math.tan(latRad) + (1.0 / math.cos(latRad))) /
-                        math.pi) /
-                2.0 *
-                n)
-            .floor();
+            math.log(math.tan(latRad) + (1.0 / math.cos(latRad))) / math.pi) /
+        2.0 *
+        worldSize);
 
     final int maxTile = n.toInt() - 1;
-    return _TileCoord(x: x.clamp(0, maxTile), y: y.clamp(0, maxTile));
+    final double clampedWorldPixelX = worldPixelX.clamp(0.0, worldSize - 1);
+    final double clampedWorldPixelY = worldPixelY.clamp(0.0, worldSize - 1);
+    return _MapTileLocation(
+      worldPixelX: clampedWorldPixelX,
+      worldPixelY: clampedWorldPixelY,
+      maxTile: maxTile,
+    );
   }
 
   static Future<ui.Image> _decodeImage(Uint8List bytes) async {
@@ -533,11 +622,16 @@ class WatermarkService {
   }
 }
 
-class _TileCoord {
-  final int x;
-  final int y;
+class _MapTileLocation {
+  final double worldPixelX;
+  final double worldPixelY;
+  final int maxTile;
 
-  const _TileCoord({required this.x, required this.y});
+  const _MapTileLocation({
+    required this.worldPixelX,
+    required this.worldPixelY,
+    required this.maxTile,
+  });
 }
 
 class WatermarkPainter extends CustomPainter {

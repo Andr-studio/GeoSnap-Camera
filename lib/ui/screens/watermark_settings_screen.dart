@@ -3,6 +3,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:geosnap_cam/core/di/service_locator.dart';
 import 'package:geosnap_cam/services/gps_service.dart';
 import 'package:geosnap_cam/services/watermark_service.dart';
 
@@ -21,6 +22,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
   static const Color _surface = Color(0xFF101113);
   static const Color _card = Color(0x9925292F);
 
+  final WatermarkService _watermarkService = appLocator<WatermarkService>();
   WatermarkConfig _config = WatermarkConfig();
   bool _isLoading = true;
 
@@ -31,7 +33,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
   }
 
   Future<void> _loadConfig() async {
-    final WatermarkConfig config = await WatermarkService.getConfig();
+    final WatermarkConfig config = await _watermarkService.getConfig();
     if (!mounted) return;
 
     setState(() {
@@ -46,12 +48,12 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
     setState(() {
       _config = newConfig;
     });
-    await WatermarkService.saveConfig(newConfig);
+    await _watermarkService.saveConfig(newConfig);
     await _prewarmAssets(newConfig);
   }
 
   Future<void> _prewarmAssets(WatermarkConfig config) async {
-    await WatermarkService.prewarmWatermarkAssets(_effectiveLocation, config);
+    await _watermarkService.prewarmWatermarkAssets(_effectiveLocation, config);
     if (mounted) {
       setState(() {});
     }
@@ -189,7 +191,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
       date: now,
       canvasWidth: canvasWidth,
     );
-    final mapImage = WatermarkService.getCachedMapImage(
+    final mapImage = _watermarkService.getCachedMapImage(
       previewLocation,
       _config,
     );

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'core/di/service_locator.dart';
 import 'ui/screens/splash_screen.dart';
 import 'ui/screens/camera_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await configureDependencies();
   // Set status bar to transparent for a more premium look
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -32,10 +34,7 @@ class MainApp extends StatelessWidget {
           surface: const Color(0xFFF8F9FA),
         ),
       ),
-      home: const SplashScreen(
-        mainApp: CameraScreen(),
-      ),
+      home: const SplashScreen(mainApp: CameraScreen()),
     );
   }
 }
-

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import '../../core/di/service_locator.dart';
 import '../../core/services/permission_service.dart';
 import 'permission_screen.dart';
 
@@ -12,8 +13,9 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  final PermissionService _permissionService = PermissionService();
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  final PermissionService _permissionService = appLocator<PermissionService>();
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   bool _isChecking = true;
@@ -25,9 +27,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
-    );
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
 
     _controller.forward();
     _checkInitialState();
@@ -48,9 +51,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       if (onboardingComplete && hasPermissions) {
         _navigateTo(widget.mainApp);
       } else {
-        _navigateTo(PermissionScreen(
-          onGranted: () => _navigateTo(widget.mainApp),
-        ));
+        _navigateTo(PermissionScreen(grantedScreen: widget.mainApp));
       }
     }
   }
@@ -81,7 +82,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         child: FadeTransition(
           opacity: _fadeAnimation,
           child: _isChecking
-              ? const CupertinoActivityIndicator(radius: 10, color: Colors.white70)
+              ? const CupertinoActivityIndicator(
+                  radius: 10,
+                  color: Colors.white70,
+                )
               : const SizedBox.shrink(),
         ),
       ),

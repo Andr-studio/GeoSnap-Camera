@@ -51,6 +51,10 @@ class LocationData {
 }
 
 class GpsService {
+  final http.Client _httpClient;
+
+  GpsService({required http.Client httpClient}) : _httpClient = httpClient;
+
   Future<bool> requestPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -98,10 +102,12 @@ class GpsService {
           final Placemark place = placemarks.first;
           final List<String> addressParts = <String>[
             if ((place.street ?? '').trim().isNotEmpty) place.street!.trim(),
-            if ((place.subLocality ?? '').trim().isNotEmpty) place.subLocality!.trim(),
+            if ((place.subLocality ?? '').trim().isNotEmpty)
+              place.subLocality!.trim(),
           ];
           final List<String> cityParts = <String>[
-            if ((place.locality ?? '').trim().isNotEmpty) place.locality!.trim(),
+            if ((place.locality ?? '').trim().isNotEmpty)
+              place.locality!.trim(),
             if ((place.subAdministrativeArea ?? '').trim().isNotEmpty)
               place.subAdministrativeArea!.trim(),
           ];
@@ -117,7 +123,8 @@ class GpsService {
           if (address.isEmpty) {
             final List<String> fallback = <String>[
               if ((place.name ?? '').trim().isNotEmpty) place.name!.trim(),
-              if ((place.thoroughfare ?? '').trim().isNotEmpty) place.thoroughfare!.trim(),
+              if ((place.thoroughfare ?? '').trim().isNotEmpty)
+                place.thoroughfare!.trim(),
             ];
             address = fallback.join(', ');
           }
@@ -166,7 +173,7 @@ class GpsService {
         '&current=temperature_2m,wind_speed_10m,uv_index'
         '&timezone=auto',
       );
-      final http.Response response = await http.get(uri);
+      final http.Response response = await _httpClient.get(uri);
       if (response.statusCode != 200) {
         return const _WeatherSnapshot();
       }
@@ -178,8 +185,8 @@ class GpsService {
 
       final Map<String, dynamic> current =
           decoded['current'] is Map<String, dynamic>
-              ? decoded['current'] as Map<String, dynamic>
-              : <String, dynamic>{};
+          ? decoded['current'] as Map<String, dynamic>
+          : <String, dynamic>{};
 
       return _WeatherSnapshot(
         timezone: (decoded['timezone'] ?? '').toString(),

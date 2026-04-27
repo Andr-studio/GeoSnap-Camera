@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:video_player/video_player.dart';
+import 'package:geosnap_cam/core/di/service_locator.dart';
 import 'package:geosnap_cam/services/gps_service.dart';
 import 'package:geosnap_cam/services/watermark_service.dart';
 import 'package:geosnap_cam/ui/screens/watermark_settings_screen.dart';
@@ -86,7 +87,8 @@ class _CameraScreenState extends State<CameraScreen>
   int _selectedPhotoSizeIndex = -1;
   Size? _appliedPhotoSize;
 
-  final GpsService _gpsService = GpsService();
+  final GpsService _gpsService = appLocator<GpsService>();
+  final WatermarkService _watermarkService = appLocator<WatermarkService>();
   LocationData? _lastKnownLocation;
 
   @override
@@ -136,8 +138,8 @@ class _CameraScreenState extends State<CameraScreen>
     final loc = await _gpsService.getCurrentLocation();
     if (loc != null) {
       _lastKnownLocation = loc;
-      final WatermarkConfig config = await WatermarkService.getConfig();
-      await WatermarkService.prewarmWatermarkAssets(loc, config);
+      final WatermarkConfig config = await _watermarkService.getConfig();
+      await _watermarkService.prewarmWatermarkAssets(loc, config);
       if (!_gpsReadyHapticPlayed) {
         _gpsReadyHapticPlayed = true;
         HapticFeedback.mediumImpact();
@@ -350,7 +352,7 @@ class _CameraScreenState extends State<CameraScreen>
     LocationData? loc = _lastKnownLocation;
 
     if (loc != null) {
-      path = await WatermarkService.applyWatermark(
+      path = await _watermarkService.applyWatermark(
         path,
         mediaCapture.isVideo,
         loc,
@@ -1048,8 +1050,8 @@ class _CameraScreenState extends State<CameraScreen>
                           );
                           if (_lastKnownLocation != null) {
                             final WatermarkConfig config =
-                                await WatermarkService.getConfig();
-                            await WatermarkService.prewarmWatermarkAssets(
+                                await _watermarkService.getConfig();
+                            await _watermarkService.prewarmWatermarkAssets(
                               _lastKnownLocation,
                               config,
                             );
@@ -1069,7 +1071,9 @@ class _CameraScreenState extends State<CameraScreen>
                         top: false,
                         bottom: _selectedAspectRatio != '9:16',
                         child: Container(
-                          height: 252,
+                          height: _selectedAspectRatio == '9:16'
+                              ? 260.0 + MediaQuery.of(context).padding.bottom
+                              : 252.0,
                           color: _isBottomPanelTransparent()
                               ? Colors.transparent
                               : Colors.black,
@@ -1209,11 +1213,6 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
       oldWidget.pinchExpandNotifier.removeListener(_onPinchExpandRequested);
       widget.pinchExpandNotifier.addListener(_onPinchExpandRequested);
     }
-    // Keep 9:16 stable: avoid carrying expanded state that can overflow.
-    if (widget.compactMode && _isExpanded) {
-      _collapseTimer?.cancel();
-      _isExpanded = false;
-    }
   }
 
   @override
@@ -1233,10 +1232,6 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
 
   void _onPinchExpandRequested() {
     if (!mounted) return;
-    if (widget.compactMode) {
-      // In 9:16 we keep the compact zoom bar while pinching to prevent overflow.
-      return;
-    }
     setState(() {
       _expandAndResetTimer();
     });
@@ -1381,7 +1376,7 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
     final bool compact = widget.compactMode;
     return SizedBox(
       key: const ValueKey('expanded'),
-      height: compact ? 82 : 104,
+      height: compact ? 96 : 118,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1418,7 +1413,7 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
           ),
           SizedBox(height: compact ? 4 : 6),
           SizedBox(
-            height: compact ? 24 : 28,
+            height: compact ? 34 : 38,
             child: Center(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
