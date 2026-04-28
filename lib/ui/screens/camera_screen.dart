@@ -49,7 +49,7 @@ class _CameraScreenState extends State<CameraScreen>
   double? _singleFingerSwipeStartY;
   double? _singleFingerSwipeLastY;
   double _cameraSwitchOverlayOpacity = 0.0;
-  bool _isSyncing = false; // 👉 Controla la sincronización en espejo
+  final bool _isSyncing = false; // 👉 Controla la sincronización en espejo
   double _lastHapticPosition = 1.0; // 👉 Guarda la última posición que vibró
   String _selectedAspectRatio = '3:4';
   double _pinchLastScale = 1.0;
