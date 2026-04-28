@@ -114,6 +114,8 @@ class _CameraScreenState extends State<CameraScreen>
 
     _lastHapticPosition = _selectedModeNotifier.value.toDouble();
     _startIconOrientationTracking();
+    // Load the GeoSnap folder so previous session files populate the strip.
+    unawaited(_loadRecentSession());
   }
 
   @override
@@ -178,15 +180,88 @@ class _CameraScreenState extends State<CameraScreen>
         });
   }
 
+  // ── Permanent storage ─────────────────────────────────────────────────────
+
+  /// Returns (and creates if needed) the permanent GeoSnap output directory
+  /// inside getApplicationDocumentsDirectory(). Files here survive app restarts
+  /// and are NOT deleted by the OS temp-file cleaner.
+  Future<Directory> _getGeoSnapDir() async {
+    final Directory base = await getApplicationDocumentsDirectory();
+    return Directory(p.join(base.path, 'GeoSnap')).create(recursive: true);
+  }
+
+  /// Builds a unique output path inside the permanent GeoSnap directory.
+  Future<String> _getPermanentOutputPath(String extension) async {
+    final Directory dir = await _getGeoSnapDir();
+    final String ts = DateTime.now().millisecondsSinceEpoch.toString();
+    return p.join(dir.path, 'geosnap_$ts$extension');
+  }
+
+  /// Scans the GeoSnap directory and loads the most recent files into the
+  /// session so the thumbnail and strip are populated on every app launch.
+  Future<void> _loadRecentSession() async {
+    try {
+      final Directory dir = await _getGeoSnapDir();
+      if (!dir.existsSync()) return;
+
+      const Set<String> photoExts = {'.jpg', '.jpeg', '.png', '.heic'};
+      const Set<String> videoExts = {'.mp4', '.mov', '.mkv'};
+      const int maxSessionFiles = 30;
+
+      final List<FileSystemEntity> entities = dir.listSync(followLinks: false)
+        ..sort((a, b) {
+          // Sort by last modified, newest first.
+          final int aMs =
+              (a is File ? a.lastModifiedSync().millisecondsSinceEpoch : 0);
+          final int bMs =
+              (b is File ? b.lastModifiedSync().millisecondsSinceEpoch : 0);
+          return bMs.compareTo(aMs);
+        });
+
+      final List<String> paths = [];
+      final List<bool> isVideos = [];
+
+      for (final FileSystemEntity entity in entities) {
+        if (entity is! File) continue;
+        final String ext = p.extension(entity.path).toLowerCase();
+        if (!photoExts.contains(ext) && !videoExts.contains(ext)) continue;
+        paths.add(entity.path);
+        isVideos.add(videoExts.contains(ext));
+        if (paths.length >= maxSessionFiles) break;
+      }
+
+      // Reverse so the strip shows oldest → newest (newest at the right).
+      final List<String> orderedPaths = paths.reversed.toList();
+      final List<bool> orderedIsVideo = isVideos.reversed.toList();
+
+      if (!mounted) return;
+      setState(() {
+        _sessionPaths
+          ..clear()
+          ..addAll(orderedPaths);
+        _sessionIsVideo
+          ..clear()
+          ..addAll(orderedIsVideo);
+        if (orderedPaths.isNotEmpty) {
+          _lastCapturePath = orderedPaths.last;
+          _lastCaptureIsVideo = orderedIsVideo.last;
+        }
+      });
+    } catch (_) {
+      // Do not crash camera if session loading fails.
+    }
+  }
+
+  // ── Raw capture path (temp) ────────────────────────────────────────────────
+
+  /// Camerawesome writes the raw capture here. Temporary — it will be processed
+  /// and the watermarked copy written to the permanent GeoSnap directory.
   Future<String> _getPath(String extension) async {
     final Directory extDir = await getTemporaryDirectory();
-    final testDir = await Directory(
-      p.join(extDir.path, 'GeoSnap'),
+    final Directory tempDir = await Directory(
+      p.join(extDir.path, 'GeoSnap_raw'),
     ).create(recursive: true);
-    return p.join(
-      testDir.path,
-      '${DateTime.now().millisecondsSinceEpoch}$extension',
-    );
+    return p.join(tempDir.path, '${DateTime.now().millisecondsSinceEpoch}$extension');
   }
 
   Future<void> _switchCamera(CameraState state) async {
@@ -348,30 +423,44 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<void> _saveMediaToGallery(MediaCapture mediaCapture) async {
     if (mediaCapture.status != MediaCaptureStatus.success) return;
-    String? path = mediaCapture.captureRequest.path;
-    if (path == null || path.isEmpty) return;
-    if (!await File(path).exists()) return;
+    final String? rawPath = mediaCapture.captureRequest.path;
+    if (rawPath == null || rawPath.isEmpty) return;
+    if (!await File(rawPath).exists()) return;
     if (!await _ensureGalleryAccess()) return;
 
     // Show spinner on the thumbnail while the watermark is being applied.
     if (mounted) setState(() => _isWatermarkProcessing = true);
 
+    // Build the permanent output path BEFORE calling applyWatermark so the
+    // watermarked file lands directly in the GeoSnap folder.
+    final String extension = p.extension(rawPath);
+    final String permanentPath = await _getPermanentOutputPath(extension);
+
     // Use last known location directly to eliminate GPS fetch delay.
     final LocationData? loc = _lastKnownLocation;
 
-    // finalPath starts as the original; replaced by the watermarked version if GPS is available.
-    String finalPath = path;
+    // finalPath: watermarked permanent file, or original raw if no GPS.
+    String finalPath = rawPath;
 
     if (loc != null) {
       finalPath = await _watermarkService.applyWatermark(
-        path,
+        rawPath,
         mediaCapture.isVideo,
         loc,
+        outputPath: permanentPath,
       );
+    } else {
+      // No GPS — copy the raw file to the permanent directory as-is.
+      try {
+        await File(rawPath).copy(permanentPath);
+        finalPath = permanentPath;
+      } catch (_) {
+        finalPath = rawPath;
+      }
     }
 
-    // Register the FINAL path (watermarked) in the session so the viewer
-    // always shows the same file that ends up in the gallery.
+    // Register the FINAL path in the session so the viewer always shows the
+    // same watermarked file that ends up in the gallery.
     if (mounted) {
       setState(() {
         _lastCapturePath = finalPath;
@@ -383,6 +472,7 @@ class _CameraScreenState extends State<CameraScreen>
       });
     }
 
+    // Save to the system gallery so it appears in Samsung Gallery / Google Photos.
     try {
       if (mediaCapture.isPicture) {
         await Gal.putImage(finalPath, album: _galleryAlbumName);
@@ -1873,6 +1963,7 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
   late int _activeIndex;
   late String _currentPath;
   late bool _currentIsVideo;
+  late PageController _pageController;
 
   // ── UI chrome visibility ─────────────────────────────────────────────────
   bool _chromeVisible = true;
@@ -1884,9 +1975,14 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
     _currentPath = widget.mediaPath;
     _currentIsVideo = widget.isVideo;
 
-    // Find the initial index in the session list (or use -1 = standalone).
+    // Find the initial index in the session list (or use last if standalone).
     final idx = widget.sessionPaths.indexOf(widget.mediaPath);
-    _activeIndex = idx >= 0 ? idx : -1;
+    _activeIndex = idx >= 0 ? idx : (widget.sessionPaths.isNotEmpty ? widget.sessionPaths.length - 1 : -1);
+
+    // PageController starts on the active item.
+    _pageController = PageController(
+      initialPage: _activeIndex >= 0 ? _activeIndex : 0,
+    );
 
     _initMedia(_currentPath, _currentIsVideo);
     _scheduleAutohide();
@@ -1959,6 +2055,12 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
       _currentPath = widget.sessionPaths[index];
       _currentIsVideo = widget.sessionIsVideo[index];
     });
+    // Animate the PageView to match.
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
     _initMedia(_currentPath, _currentIsVideo);
     _scheduleAutohide();
   }
@@ -2089,6 +2191,7 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
     _autohideTimer?.cancel();
     _progressTimer?.cancel();
     _videoController?.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -2108,11 +2211,36 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
         onTap: _toggleChrome,
         child: Stack(
           children: [
-            // ── Main media view ───────────────────────────────────────────
+            // ── Main media view: carousel or single ────────────────────────
             Positioned.fill(
-              child: _currentIsVideo
-                  ? _buildVideoView()
-                  : _buildImageView(),
+              child: widget.sessionPaths.length > 1
+                  ? PageView.builder(
+                      controller: _pageController,
+                      itemCount: widget.sessionPaths.length,
+                      onPageChanged: (i) {
+                        final String path = widget.sessionPaths[i];
+                        final bool iv = widget.sessionIsVideo[i];
+                        setState(() {
+                          _activeIndex = i;
+                          _currentPath = path;
+                          _currentIsVideo = iv;
+                        });
+                        _initMedia(path, iv);
+                        _scheduleAutohide();
+                      },
+                      itemBuilder: (context, i) {
+                        final String path = widget.sessionPaths[i];
+                        final bool iv = widget.sessionIsVideo[i];
+                        if (iv) {
+                          // Video pages show the player only for the active one.
+                          return i == _activeIndex
+                              ? _buildVideoView()
+                              : _buildVideoPlaceholder(path);
+                        }
+                        return _buildImagePage(path);
+                      },
+                    )
+                  : (_currentIsVideo ? _buildVideoView() : _buildImageView()),
             ),
 
             // ── Bottom chrome: session strip + action bar ─────────────────
@@ -2193,10 +2321,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
               end: Alignment.bottomCenter,
               colors: [
                 Colors.transparent,
-                Colors.black.withValues(alpha: 0.65),
-                Colors.black.withValues(alpha: 0.88),
+                Colors.black.withValues(alpha: 0.30),   // ← más translúcido
+                Colors.black.withValues(alpha: 0.52),   // ← más translúcido
               ],
-              stops: const [0.0, 0.35, 1.0],
+              stops: const [0.0, 0.40, 1.0],
             ),
           ),
           child: Padding(
@@ -2387,13 +2515,16 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
 
   // ── Media views ───────────────────────────────────────────────────────────
 
-  Widget _buildImageView() {
+  // ── Image & video pages ────────────────────────────────────────────────────
+
+  /// Single-image page used inside the carousel.
+  Widget _buildImagePage(String path) {
     return InteractiveViewer(
       minScale: 1.0,
       maxScale: 5.0,
       child: Center(
         child: Image.file(
-          File(_currentPath),
+          File(path),
           fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => const Center(
             child: Text('No se pudo cargar la imagen',
@@ -2403,6 +2534,18 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
       ),
     );
   }
+
+  /// Thumbnail placeholder shown for video pages that are not currently active.
+  Widget _buildVideoPlaceholder(String path) {
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Icon(CupertinoIcons.play_circle, color: Colors.white38, size: 64),
+      ),
+    );
+  }
+
+  Widget _buildImageView() => _buildImagePage(_currentPath);
 
   Widget _buildVideoView() {
     final controller = _videoController;

@@ -122,8 +122,9 @@ class WatermarkService {
   Future<String> applyWatermark(
     String inputPath,
     bool isVideo,
-    LocationData location,
-  ) async {
+    LocationData location, {
+    String? outputPath,
+  }) async {
     try {
       // ── Fase 1: paralelizar sonda de video y carga de config ──────────────
       final results = await Future.wait([
@@ -185,28 +186,32 @@ class WatermarkService {
         videoHeight: videoH,
       );
 
-      final Directory extDir = await getTemporaryDirectory();
-      final String extension = p.extension(inputPath);
-      final String outputPath = p.join(
-        extDir.path,
-        'watermarked_${DateTime.now().millisecondsSinceEpoch}$extension',
-      );
+      // Use caller-supplied outputPath (permanent dir) or fall back to temp.
+      final String resolvedOutputPath;
+      if (outputPath != null && outputPath.isNotEmpty) {
+        resolvedOutputPath = outputPath;
+      } else {
+        final Directory extDir = await getTemporaryDirectory();
+        final String extension = p.extension(inputPath);
+        resolvedOutputPath = p.join(
+          extDir.path,
+          'watermarked_${DateTime.now().millisecondsSinceEpoch}$extension',
+        );
+      }
 
       if (isVideo) {
-        // Intentar primero con h264_mediacodec (hardware, mucho más rápido).
-        // Si falla, caer en x264 por software como respaldo.
         final bool success = await _encodeVideoWithWatermark(
           inputPath: inputPath,
           watermarkPath: watermarkFile.path,
-          outputPath: outputPath,
+          outputPath: resolvedOutputPath,
         );
-        if (success) return outputPath;
+        if (success) return resolvedOutputPath;
         return inputPath;
       }
 
       final String? photoOutputPath = await _applyPhotoWatermarkWithImageEditor(
         inputPath: inputPath,
-        outputPath: outputPath,
+        outputPath: resolvedOutputPath,
         watermarkFile: watermarkFile,
         config: config,
         location: location,
