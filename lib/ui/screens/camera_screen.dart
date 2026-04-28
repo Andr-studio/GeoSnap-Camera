@@ -211,10 +211,12 @@ class _CameraScreenState extends State<CameraScreen>
       final List<FileSystemEntity> entities = dir.listSync(followLinks: false)
         ..sort((a, b) {
           // Sort by last modified, newest first.
-          final int aMs =
-              (a is File ? a.lastModifiedSync().millisecondsSinceEpoch : 0);
-          final int bMs =
-              (b is File ? b.lastModifiedSync().millisecondsSinceEpoch : 0);
+          final int aMs = (a is File
+              ? a.lastModifiedSync().millisecondsSinceEpoch
+              : 0);
+          final int bMs = (b is File
+              ? b.lastModifiedSync().millisecondsSinceEpoch
+              : 0);
           return bMs.compareTo(aMs);
         });
 
@@ -261,7 +263,10 @@ class _CameraScreenState extends State<CameraScreen>
     final Directory tempDir = await Directory(
       p.join(extDir.path, 'GeoSnap_raw'),
     ).create(recursive: true);
-    return p.join(tempDir.path, '${DateTime.now().millisecondsSinceEpoch}$extension');
+    return p.join(
+      tempDir.path,
+      '${DateTime.now().millisecondsSinceEpoch}$extension',
+    );
   }
 
   Future<void> _switchCamera(CameraState state) async {
@@ -1720,33 +1725,33 @@ class _CircularPreview extends StatelessWidget {
                     ),
                   )
                 : hasMedia
-                    ? Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (!isVideo)
-                            Image.file(
-                              File(filePath!),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
-                                child: Icon(
-                                  CupertinoIcons.photo,
-                                  color: Colors.white54,
-                                ),
-                              ),
-                            )
-                          else
-                            Container(color: Colors.black45),
-                          if (isVideo)
-                            const Center(
-                              child: Icon(
-                                CupertinoIcons.play_fill,
-                                color: Colors.white,
-                                size: 18,
-                              ),
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (!isVideo)
+                        Image.file(
+                          File(filePath!),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(
+                              CupertinoIcons.photo,
+                              color: Colors.white54,
                             ),
-                        ],
-                      )
-                    : const Icon(CupertinoIcons.photo, color: Colors.white54),
+                          ),
+                        )
+                      else
+                        Container(color: Colors.black45),
+                      if (isVideo)
+                        const Center(
+                          child: Icon(
+                            CupertinoIcons.play_fill,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                    ],
+                  )
+                : const Icon(CupertinoIcons.photo, color: Colors.white54),
           ),
         ),
       ),
@@ -1757,6 +1762,7 @@ class _CircularPreview extends StatelessWidget {
 class _MediaPreviewScreen extends StatefulWidget {
   final String mediaPath;
   final bool isVideo;
+
   /// All paths captured during this session (ordered oldest → newest).
   final List<String> sessionPaths;
   final List<bool> sessionIsVideo;
@@ -1977,7 +1983,11 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
 
     // Find the initial index in the session list (or use last if standalone).
     final idx = widget.sessionPaths.indexOf(widget.mediaPath);
-    _activeIndex = idx >= 0 ? idx : (widget.sessionPaths.isNotEmpty ? widget.sessionPaths.length - 1 : -1);
+    _activeIndex = idx >= 0
+        ? idx
+        : (widget.sessionPaths.isNotEmpty
+              ? widget.sessionPaths.length - 1
+              : -1);
 
     // PageController starts on the active item.
     _pageController = PageController(
@@ -2069,9 +2079,7 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
 
   Future<void> _share() async {
     HapticFeedback.selectionClick();
-    await SharePlus.instance.share(
-      ShareParams(files: [XFile(_currentPath)]),
-    );
+    await SharePlus.instance.share(ShareParams(files: [XFile(_currentPath)]));
   }
 
   Future<void> _confirmDelete() async {
@@ -2149,7 +2157,9 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir la galería del sistema')),
+        const SnackBar(
+          content: Text('No se pudo abrir la galería del sistema'),
+        ),
       );
     }
   }
@@ -2277,7 +2287,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
               child: IconButton(
-                icon: const Icon(CupertinoIcons.chevron_back, color: Colors.white),
+                icon: const Icon(
+                  CupertinoIcons.chevron_back,
+                  color: Colors.white,
+                ),
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ),
@@ -2298,7 +2311,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
                   filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                   child: IconButton(
                     tooltip: 'Abrir galería',
-                    icon: const Icon(CupertinoIcons.photo_on_rectangle, color: Colors.white),
+                    icon: const Icon(
+                      CupertinoIcons.photo_on_rectangle,
+                      color: Colors.white,
+                    ),
                     onPressed: _openSystemGallery,
                   ),
                 ),
@@ -2321,8 +2337,18 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
               end: Alignment.bottomCenter,
               colors: [
                 Colors.transparent,
-                Colors.black.withValues(alpha: 0.30),   // ← más translúcido
-                Colors.black.withValues(alpha: 0.52),   // ← más translúcido
+                const Color.fromARGB(
+                  0,
+                  0,
+                  0,
+                  0,
+                ).withValues(alpha: 0.30), // ← más translúcido
+                const Color.fromARGB(
+                  0,
+                  0,
+                  0,
+                  0,
+                ).withValues(alpha: 0.52), // ← más translúcido
               ],
               stops: const [0.0, 0.40, 1.0],
             ),
@@ -2354,9 +2380,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
 
   Widget _buildVideoProgressBar() {
     final double total = _videoDuration.inMilliseconds.toDouble();
-    final double pos = _videoPosition.inMilliseconds
-        .toDouble()
-        .clamp(0.0, total > 0 ? total : 1.0);
+    final double pos = _videoPosition.inMilliseconds.toDouble().clamp(
+      0.0,
+      total > 0 ? total : 1.0,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -2368,7 +2395,9 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
             child: Row(
               children: [
                 Icon(
-                  _isPlaying ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
+                  _isPlaying
+                      ? CupertinoIcons.pause_fill
+                      : CupertinoIcons.play_fill,
                   color: Colors.white,
                   size: 20,
                 ),
@@ -2388,9 +2417,13 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
                       inactiveTrackColor: Colors.white24,
                       thumbColor: Colors.white,
                       overlayColor: Colors.white24,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
+                      ),
                       trackHeight: 2.5,
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 14,
+                      ),
                     ),
                     child: Slider(
                       value: pos,
@@ -2452,14 +2485,21 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
                   fit: StackFit.expand,
                   children: [
                     if (!iv)
-                      Image.file(File(p), fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(color: Colors.white12))
+                      Image.file(
+                        File(p),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            Container(color: Colors.white12),
+                      )
                     else
                       Container(color: Colors.black54),
                     if (iv)
                       const Center(
-                        child: Icon(CupertinoIcons.play_fill,
-                            color: Colors.white70, size: 16),
+                        child: Icon(
+                          CupertinoIcons.play_fill,
+                          color: Colors.white70,
+                          size: 16,
+                        ),
                       ),
                   ],
                 ),
@@ -2527,8 +2567,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
           File(path),
           fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => const Center(
-            child: Text('No se pudo cargar la imagen',
-                style: TextStyle(color: Colors.white70)),
+            child: Text(
+              'No se pudo cargar la imagen',
+              style: TextStyle(color: Colors.white70),
+            ),
           ),
         ),
       ),
@@ -2540,7 +2582,11 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
     return Container(
       color: Colors.black,
       child: const Center(
-        child: Icon(CupertinoIcons.play_circle, color: Colors.white38, size: 64),
+        child: Icon(
+          CupertinoIcons.play_circle,
+          color: Colors.white38,
+          size: 64,
+        ),
       ),
     );
   }
@@ -2551,8 +2597,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
     final controller = _videoController;
     if (controller == null) {
       return const Center(
-        child: Text('No se pudo cargar el video',
-            style: TextStyle(color: Colors.white70)),
+        child: Text(
+          'No se pudo cargar el video',
+          style: TextStyle(color: Colors.white70),
+        ),
       );
     }
     return FutureBuilder<void>(
@@ -2563,8 +2611,10 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
         }
         if (snapshot.hasError || !controller.value.isInitialized) {
           return const Center(
-            child: Text('No se pudo cargar el video',
-                style: TextStyle(color: Colors.white70)),
+            child: Text(
+              'No se pudo cargar el video',
+              style: TextStyle(color: Colors.white70),
+            ),
           );
         }
         return GestureDetector(
