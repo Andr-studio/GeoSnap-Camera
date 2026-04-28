@@ -1094,12 +1094,15 @@ class WatermarkPainter extends CustomPainter {
 
     double maxTextWidth = 0;
     maxTextWidth = math.max(maxTextWidth, _textWidth(title, titleStyle));
-    if (config.showAddress)
+    if (config.showAddress) {
       maxTextWidth = math.max(maxTextWidth, _textWidth(addressLine, bodyStyle));
-    if (config.showCityCoords)
+    }
+    if (config.showCityCoords) {
       maxTextWidth = math.max(maxTextWidth, _textWidth(coordsLine, bodyStyle));
-    if (config.showDate)
+    }
+    if (config.showDate) {
       maxTextWidth = math.max(maxTextWidth, _textWidth(dateLine, bodyStyle));
+    }
 
     final double weatherDividerGap = 10 * s;
     final double weatherWidth =

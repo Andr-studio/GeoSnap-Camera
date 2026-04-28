@@ -49,8 +49,6 @@ class _CameraScreenState extends State<CameraScreen>
   double? _singleFingerSwipeStartY;
   double? _singleFingerSwipeLastY;
   double _cameraSwitchOverlayOpacity = 0.0;
-  final bool _isSyncing = false; // 👉 Controla la sincronización en espejo
-  double _lastHapticPosition = 1.0; // 👉 Guarda la última posición que vibró
   String _selectedAspectRatio = '3:4';
   double _pinchLastScale = 1.0;
   String _resolutionLabel = '12M';
@@ -111,8 +109,6 @@ class _CameraScreenState extends State<CameraScreen>
       initialPage: _selectedModeNotifier.value,
       viewportFraction: 0.22,
     );
-
-    _lastHapticPosition = _selectedModeNotifier.value.toDouble();
     _startIconOrientationTracking();
     // Load the GeoSnap folder so previous session files populate the strip.
     unawaited(_loadRecentSession());
@@ -1313,11 +1309,13 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
   double _minZoom = 1.0;
   double _maxZoom = 1.0;
   bool _isBoundsReady = false;
+  double _lastHapticValue = -1.0; // 👉 Para feedback táctil por pasos
 
   @override
   void initState() {
     super.initState();
     _currentZoom = widget.sensorConfig.zoom;
+    _lastHapticValue = _currentZoom;
     _zoomSubscription = widget.sensorConfig.zoom$.listen(_onZoomChanged);
     widget.pinchExpandNotifier.addListener(_onPinchExpandRequested);
     _loadZoomBounds();
@@ -1348,6 +1346,13 @@ class _ZoomSelectorState extends State<_ZoomSelector> {
 
   void _onZoomChanged(double zoom) {
     if (!mounted) return;
+    
+    // 👉 Feedback háptico por pasos (cada 0.05 de zoom normalizado)
+    if ((zoom - _lastHapticValue).abs() > 0.05) {
+      HapticFeedback.selectionClick();
+      _lastHapticValue = zoom;
+    }
+
     setState(() {
       _currentZoom = zoom;
     });
