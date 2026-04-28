@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'dart:io';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:camerawesome/camerawesome_plugin.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:sensors_plus/sensors_plus.dart';
@@ -65,6 +67,9 @@ class _CameraScreenState extends State<CameraScreen>
   bool _galleryAccessGranted = false;
   String? _lastCapturePath;
   bool _lastCaptureIsVideo = false;
+  bool _isWatermarkProcessing = false;
+  final List<String> _sessionPaths = [];
+  final List<bool> _sessionIsVideo = [];
   bool _gpsReadyHapticPlayed = false;
   Offset? _focusPoint;
   bool _focusLocked = false;
@@ -348,30 +353,45 @@ class _CameraScreenState extends State<CameraScreen>
     if (!await File(path).exists()) return;
     if (!await _ensureGalleryAccess()) return;
 
-    // Use last known location directly to eliminate GPS fetch delay
-    LocationData? loc = _lastKnownLocation;
+    // Show spinner on the thumbnail while the watermark is being applied.
+    if (mounted) setState(() => _isWatermarkProcessing = true);
+
+    // Use last known location directly to eliminate GPS fetch delay.
+    final LocationData? loc = _lastKnownLocation;
+
+    // finalPath starts as the original; replaced by the watermarked version if GPS is available.
+    String finalPath = path;
 
     if (loc != null) {
-      path = await _watermarkService.applyWatermark(
+      finalPath = await _watermarkService.applyWatermark(
         path,
         mediaCapture.isVideo,
         loc,
       );
-      if (mounted) {
-        setState(() {
-          _lastCapturePath = path;
-        });
-      }
+    }
+
+    // Register the FINAL path (watermarked) in the session so the viewer
+    // always shows the same file that ends up in the gallery.
+    if (mounted) {
+      setState(() {
+        _lastCapturePath = finalPath;
+        _isWatermarkProcessing = false;
+        if (!_sessionPaths.contains(finalPath)) {
+          _sessionPaths.add(finalPath);
+          _sessionIsVideo.add(mediaCapture.isVideo);
+        }
+      });
     }
 
     try {
       if (mediaCapture.isPicture) {
-        await Gal.putImage(path, album: _galleryAlbumName);
+        await Gal.putImage(finalPath, album: _galleryAlbumName);
       } else if (mediaCapture.isVideo) {
-        await Gal.putVideo(path, album: _galleryAlbumName);
+        await Gal.putVideo(finalPath, album: _galleryAlbumName);
       }
     } catch (_) {
       // Keep capture flow resilient if gallery save fails on specific devices.
+      if (mounted) setState(() => _isWatermarkProcessing = false);
     }
   }
 
@@ -390,13 +410,16 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     if (mediaCapture.status == MediaCaptureStatus.success) {
-      final String? path = mediaCapture.captureRequest.path;
-      if (mounted && path != null && path.isNotEmpty) {
+      // Update the isVideo flag immediately so the thumbnail icon is correct
+      // while the watermark is being processed in the background.
+      if (mounted) {
         setState(() {
-          _lastCapturePath = path;
           _lastCaptureIsVideo = mediaCapture.isVideo;
         });
       }
+      // _saveMediaToGallery applies the watermark and THEN registers the
+      // final path in _sessionPaths / _lastCapturePath, so the viewer always
+      // shows the same watermarked file that goes to the gallery.
       unawaited(_saveMediaToGallery(mediaCapture));
     }
   }
@@ -409,8 +432,12 @@ class _CameraScreenState extends State<CameraScreen>
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            _MediaPreviewScreen(mediaPath: path, isVideo: _lastCaptureIsVideo),
+        builder: (_) => _MediaPreviewScreen(
+          mediaPath: path,
+          isVideo: _lastCaptureIsVideo,
+          sessionPaths: List<String>.from(_sessionPaths),
+          sessionIsVideo: List<bool>.from(_sessionIsVideo),
+        ),
       ),
     );
   }
@@ -1098,6 +1125,7 @@ class _CameraScreenState extends State<CameraScreen>
                                       onTap: _openLastCapturePreview,
                                       filePath: _lastCapturePath,
                                       isVideo: _lastCaptureIsVideo,
+                                      isProcessing: _isWatermarkProcessing,
                                       iconRotationTurns: _iconRotationTurns,
                                     ),
                                     ValueListenableBuilder<int>(
@@ -1562,22 +1590,25 @@ class _CircularPreview extends StatelessWidget {
   final VoidCallback onTap;
   final String? filePath;
   final bool isVideo;
+  final bool isProcessing;
   final double iconRotationTurns;
   const _CircularPreview({
     required this.onTap,
     this.filePath,
     this.isVideo = false,
+    this.isProcessing = false,
     this.iconRotationTurns = 0.0,
   });
   @override
   Widget build(BuildContext context) {
     final bool hasMedia =
+        !isProcessing &&
         filePath != null &&
         filePath!.isNotEmpty &&
         File(filePath!).existsSync();
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: isProcessing ? null : onTap,
       child: Container(
         width: 50,
         height: 50,
@@ -1591,34 +1622,41 @@ class _CircularPreview extends StatelessWidget {
             turns: iconRotationTurns,
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
-            child: hasMedia
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (!isVideo)
-                        Image.file(
-                          File(filePath!),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
-                            child: Icon(
-                              CupertinoIcons.photo,
-                              color: Colors.white54,
-                            ),
-                          ),
-                        )
-                      else
-                        Container(color: Colors.black45),
-                      if (isVideo)
-                        const Center(
-                          child: Icon(
-                            CupertinoIcons.play_fill,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                    ],
+            child: isProcessing
+                ? const Center(
+                    child: CupertinoActivityIndicator(
+                      radius: 11,
+                      color: Colors.white70,
+                    ),
                   )
-                : const Icon(CupertinoIcons.photo, color: Colors.white54),
+                : hasMedia
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (!isVideo)
+                            Image.file(
+                              File(filePath!),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Center(
+                                child: Icon(
+                                  CupertinoIcons.photo,
+                                  color: Colors.white54,
+                                ),
+                              ),
+                            )
+                          else
+                            Container(color: Colors.black45),
+                          if (isVideo)
+                            const Center(
+                              child: Icon(
+                                CupertinoIcons.play_fill,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                        ],
+                      )
+                    : const Icon(CupertinoIcons.photo, color: Colors.white54),
           ),
         ),
       ),
@@ -1629,7 +1667,16 @@ class _CircularPreview extends StatelessWidget {
 class _MediaPreviewScreen extends StatefulWidget {
   final String mediaPath;
   final bool isVideo;
-  const _MediaPreviewScreen({required this.mediaPath, required this.isVideo});
+  /// All paths captured during this session (ordered oldest → newest).
+  final List<String> sessionPaths;
+  final List<bool> sessionIsVideo;
+
+  const _MediaPreviewScreen({
+    required this.mediaPath,
+    required this.isVideo,
+    this.sessionPaths = const [],
+    this.sessionIsVideo = const [],
+  });
 
   @override
   State<_MediaPreviewScreen> createState() => _MediaPreviewScreenState();
@@ -1812,9 +1859,198 @@ class _ExposureSlider extends StatelessWidget {
   }
 }
 
-class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
+class _MediaPreviewScreenState extends State<_MediaPreviewScreen>
+    with TickerProviderStateMixin {
+  // ── Video ────────────────────────────────────────────────────────────────
   VideoPlayerController? _videoController;
   Future<void>? _videoInitFuture;
+  bool _isPlaying = false;
+  Duration _videoPosition = Duration.zero;
+  Duration _videoDuration = Duration.zero;
+  Timer? _progressTimer;
+
+  // ── Session ──────────────────────────────────────────────────────────────
+  late int _activeIndex;
+  late String _currentPath;
+  late bool _currentIsVideo;
+
+  // ── UI chrome visibility ─────────────────────────────────────────────────
+  bool _chromeVisible = true;
+  Timer? _autohideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPath = widget.mediaPath;
+    _currentIsVideo = widget.isVideo;
+
+    // Find the initial index in the session list (or use -1 = standalone).
+    final idx = widget.sessionPaths.indexOf(widget.mediaPath);
+    _activeIndex = idx >= 0 ? idx : -1;
+
+    _initMedia(_currentPath, _currentIsVideo);
+    _scheduleAutohide();
+  }
+
+  // ── Media initialisation ─────────────────────────────────────────────────
+
+  void _initMedia(String path, bool isVideo) {
+    _disposeVideoController();
+    if (!isVideo) return;
+
+    final controller = VideoPlayerController.file(File(path));
+    _videoController = controller;
+    _videoInitFuture = controller.initialize().then((_) {
+      if (!mounted) return;
+      controller.setLooping(true);
+      _videoDuration = controller.value.duration;
+      setState(() {
+        _isPlaying = true;
+      });
+      controller.play();
+      _startProgressTimer();
+    });
+  }
+
+  void _disposeVideoController() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
+    _videoController?.dispose();
+    _videoController = null;
+    _videoInitFuture = null;
+    _videoPosition = Duration.zero;
+    _videoDuration = Duration.zero;
+    _isPlaying = false;
+  }
+
+  void _startProgressTimer() {
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      final ctrl = _videoController;
+      if (ctrl == null || !mounted) return;
+      setState(() {
+        _videoPosition = ctrl.value.position;
+        _isPlaying = ctrl.value.isPlaying;
+      });
+    });
+  }
+
+  // ── UI chrome ─────────────────────────────────────────────────────────────
+
+  void _scheduleAutohide() {
+    _autohideTimer?.cancel();
+    _autohideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _chromeVisible = false);
+    });
+  }
+
+  void _toggleChrome() {
+    setState(() => _chromeVisible = !_chromeVisible);
+    if (_chromeVisible) _scheduleAutohide();
+  }
+
+  // ── Session navigation ───────────────────────────────────────────────────
+
+  void _selectSession(int index) {
+    if (index < 0 || index >= widget.sessionPaths.length) return;
+    if (index == _activeIndex) return;
+    setState(() {
+      _activeIndex = index;
+      _currentPath = widget.sessionPaths[index];
+      _currentIsVideo = widget.sessionIsVideo[index];
+    });
+    _initMedia(_currentPath, _currentIsVideo);
+    _scheduleAutohide();
+  }
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+
+  Future<void> _share() async {
+    HapticFeedback.selectionClick();
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(_currentPath)]),
+    );
+  }
+
+  Future<void> _confirmDelete() async {
+    HapticFeedback.mediumImpact();
+    final bool? confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (_) => CupertinoAlertDialog(
+        title: const Text('Eliminar'),
+        content: Text(
+          _currentIsVideo
+              ? '¿Eliminar este video? Esta acción no se puede deshacer.'
+              : '¿Eliminar esta foto? Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final File f = File(_currentPath);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+
+    if (!mounted) return;
+    // If we're in a session and more items remain, move to previous/next.
+    if (widget.sessionPaths.isNotEmpty) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _openSystemGallery() async {
+    try {
+      if (Platform.isAndroid) {
+        final List<AndroidIntent> intents = [
+          const AndroidIntent(
+            action: 'android.intent.action.MAIN',
+            package: 'com.sec.android.gallery3d',
+            flags: [268435456],
+          ),
+          const AndroidIntent(
+            action: 'android.intent.action.MAIN',
+            category: 'android.intent.category.APP_GALLERY',
+            flags: [268435456],
+          ),
+          const AndroidIntent(
+            action: 'android.intent.action.MAIN',
+            package: 'com.google.android.apps.photos',
+            flags: [268435456],
+          ),
+          const AndroidIntent(
+            action: 'android.intent.action.VIEW',
+            type: 'image/*',
+            flags: [268435456],
+          ),
+          const AndroidIntent(action: 'android.provider.action.PICK_IMAGES'),
+        ];
+        for (final intent in intents) {
+          if (await _tryLaunchAndroidIntent(intent)) return;
+        }
+        throw Exception('No gallery intent resolved');
+      }
+      await Gal.open();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la galería del sistema')),
+      );
+    }
+  }
 
   Future<bool> _tryLaunchAndroidIntent(AndroidIntent intent) async {
     try {
@@ -1825,111 +2061,343 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
     }
   }
 
-  Future<void> _openSystemGallery() async {
-    try {
-      if (Platform.isAndroid) {
-        final List<AndroidIntent> intents = [
-          // 1. Native Samsung Gallery (Main)
-          const AndroidIntent(
-            action: 'android.intent.action.MAIN',
-            package: 'com.sec.android.gallery3d',
-            flags: [268435456],
-          ),
-          // 2. Generic Gallery Category
-          const AndroidIntent(
-            action: 'android.intent.action.MAIN',
-            category: 'android.intent.category.APP_GALLERY',
-            flags: [268435456],
-          ),
-          // 3. Google Photos (Fallback)
-          const AndroidIntent(
-            action: 'android.intent.action.MAIN',
-            package: 'com.google.android.apps.photos',
-            flags: [268435456],
-          ),
-          // 4. Standard View for Images
-          const AndroidIntent(
-            action: 'android.intent.action.VIEW',
-            type: 'image/*',
-            flags: [268435456],
-          ),
-          // 5. Modern Photo Picker
-          const AndroidIntent(action: 'android.provider.action.PICK_IMAGES'),
-        ];
+  // ── Video controls ───────────────────────────────────────────────────────
 
-        for (final intent in intents) {
-          final bool launched = await _tryLaunchAndroidIntent(intent);
-          if (launched) return;
-        }
-        throw Exception('No gallery intent resolved');
-      }
-      await Gal.open();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo abrir la galeria del sistema'),
-        ),
-      );
+  void _togglePlayPause() {
+    final ctrl = _videoController;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    HapticFeedback.selectionClick();
+    if (ctrl.value.isPlaying) {
+      ctrl.pause();
+    } else {
+      ctrl.play();
     }
+    _scheduleAutohide();
+    setState(() => _isPlaying = ctrl.value.isPlaying);
   }
 
-  @override
-  void initState() {
-    super.initState();
-    if (widget.isVideo) {
-      final controller = VideoPlayerController.file(File(widget.mediaPath));
-      _videoController = controller;
-      _videoInitFuture = controller.initialize().then((_) {
-        if (!mounted) return;
-        controller.setLooping(true);
-        setState(() {});
-        controller.play();
-      });
-    }
+  String _formatDuration(Duration d) {
+    final int m = d.inMinutes;
+    final int s = d.inSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
+
+  // ── Lifecycle ────────────────────────────────────────────────────────────
 
   @override
   void dispose() {
+    _autohideTimer?.cancel();
+    _progressTimer?.cancel();
     _videoController?.dispose();
     super.dispose();
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
+    final bool hasSession = widget.sessionPaths.length > 1;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            tooltip: 'Abrir galeria',
-            icon: const Icon(CupertinoIcons.photo_on_rectangle),
-            onPressed: _openSystemGallery,
-          ),
-        ],
-      ),
-      body: SafeArea(
-        top: false,
-        bottom: true,
-        child: widget.isVideo ? _buildVideoView() : _buildImageView(),
+      extendBodyBehindAppBar: true,
+      appBar: _buildAppBar(),
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggleChrome,
+        child: Stack(
+          children: [
+            // ── Main media view ───────────────────────────────────────────
+            Positioned.fill(
+              child: _currentIsVideo
+                  ? _buildVideoView()
+                  : _buildImageView(),
+            ),
+
+            // ── Bottom chrome: session strip + action bar ─────────────────
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: AnimatedOpacity(
+                opacity: _chromeVisible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 260),
+                child: IgnorePointer(
+                  ignoring: !_chromeVisible,
+                  child: _buildBottomChrome(bottomPadding, hasSession),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      leading: AnimatedOpacity(
+        opacity: _chromeVisible ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 260),
+        child: IgnorePointer(
+          ignoring: !_chromeVisible,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: IconButton(
+                icon: const Icon(CupertinoIcons.chevron_back, color: Colors.white),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        AnimatedOpacity(
+          opacity: _chromeVisible ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 260),
+          child: IgnorePointer(
+            ignoring: !_chromeVisible,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: IconButton(
+                    tooltip: 'Abrir galería',
+                    icon: const Icon(CupertinoIcons.photo_on_rectangle, color: Colors.white),
+                    onPressed: _openSystemGallery,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomChrome(double bottomPadding, bool hasSession) {
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.65),
+                Colors.black.withValues(alpha: 0.88),
+              ],
+              stops: const [0.0, 0.35, 1.0],
+            ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(bottom: bottomPadding + 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Video progress bar
+                if (_currentIsVideo) _buildVideoProgressBar(),
+
+                // Session thumbnails strip
+                if (hasSession) _buildSessionStrip(),
+
+                const SizedBox(height: 12),
+
+                // Action buttons row
+                _buildActionBar(),
+
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoProgressBar() {
+    final double total = _videoDuration.inMilliseconds.toDouble();
+    final double pos = _videoPosition.inMilliseconds
+        .toDouble()
+        .clamp(0.0, total > 0 ? total : 1.0);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Column(
+        children: [
+          // Tap to toggle play/pause
+          GestureDetector(
+            onTap: _togglePlayPause,
+            child: Row(
+              children: [
+                Icon(
+                  _isPlaying ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  _formatDuration(_videoPosition),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: Colors.white,
+                      inactiveTrackColor: Colors.white24,
+                      thumbColor: Colors.white,
+                      overlayColor: Colors.white24,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      trackHeight: 2.5,
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                    ),
+                    child: Slider(
+                      value: pos,
+                      min: 0,
+                      max: total > 0 ? total : 1.0,
+                      onChanged: (v) {
+                        _videoController?.seekTo(
+                          Duration(milliseconds: v.round()),
+                        );
+                        _scheduleAutohide();
+                      },
+                    ),
+                  ),
+                ),
+                Text(
+                  _formatDuration(_videoDuration),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSessionStrip() {
+    return SizedBox(
+      height: 72,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        scrollDirection: Axis.horizontal,
+        itemCount: widget.sessionPaths.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final bool isActive = i == _activeIndex;
+          final bool iv = widget.sessionIsVideo[i];
+          final String p = widget.sessionPaths[i];
+          return GestureDetector(
+            onTap: () => _selectSession(i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              width: 56,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isActive ? Colors.white : Colors.white24,
+                  width: isActive ? 2.0 : 1.0,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (!iv)
+                      Image.file(File(p), fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(color: Colors.white12))
+                    else
+                      Container(color: Colors.black54),
+                    if (iv)
+                      const Center(
+                        child: Icon(CupertinoIcons.play_fill,
+                            color: Colors.white70, size: 16),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildActionBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // ── Compartir ────────────────────────────────────────────────────
+          _ActionButton(
+            icon: CupertinoIcons.share,
+            label: 'Compartir',
+            onTap: _share,
+          ),
+
+          // ── Play/Pausa (solo video) ───────────────────────────────────────
+          if (_currentIsVideo)
+            _ActionButton(
+              icon: _isPlaying
+                  ? CupertinoIcons.pause_fill
+                  : CupertinoIcons.play_fill,
+              label: _isPlaying ? 'Pausar' : 'Reproducir',
+              onTap: _togglePlayPause,
+            ),
+
+          // ── Galería ───────────────────────────────────────────────────────
+          _ActionButton(
+            icon: CupertinoIcons.photo_on_rectangle,
+            label: 'Galería',
+            onTap: _openSystemGallery,
+          ),
+
+          // ── Eliminar ─────────────────────────────────────────────────────
+          _ActionButton(
+            icon: CupertinoIcons.trash,
+            label: 'Eliminar',
+            isDestructive: true,
+            onTap: _confirmDelete,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Media views ───────────────────────────────────────────────────────────
+
   Widget _buildImageView() {
-    return Center(
-      child: InteractiveViewer(
-        minScale: 1.0,
-        maxScale: 4.0,
+    return InteractiveViewer(
+      minScale: 1.0,
+      maxScale: 5.0,
+      child: Center(
         child: Image.file(
-          File(widget.mediaPath),
+          File(_currentPath),
           fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const Text(
-            'No se pudo cargar la imagen',
-            style: TextStyle(color: Colors.white70),
+          errorBuilder: (_, __, ___) => const Center(
+            child: Text('No se pudo cargar la imagen',
+                style: TextStyle(color: Colors.white70)),
           ),
         ),
       ),
@@ -1938,35 +2406,27 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
 
   Widget _buildVideoView() {
     final controller = _videoController;
-    final double controlsBottomInset =
-        MediaQuery.of(context).padding.bottom + 20;
     if (controller == null) {
       return const Center(
-        child: Text(
-          'No se pudo cargar el video',
-          style: TextStyle(color: Colors.white70),
-        ),
+        child: Text('No se pudo cargar el video',
+            style: TextStyle(color: Colors.white70)),
       );
     }
-
     return FutureBuilder<void>(
       future: _videoInitFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CupertinoActivityIndicator(radius: 12));
+          return const Center(child: CupertinoActivityIndicator(radius: 14));
         }
         if (snapshot.hasError || !controller.value.isInitialized) {
           return const Center(
-            child: Text(
-              'No se pudo cargar el video',
-              style: TextStyle(color: Colors.white70),
-            ),
+            child: Text('No se pudo cargar el video',
+                style: TextStyle(color: Colors.white70)),
           );
         }
-
-        return Center(
-          child: Padding(
-            padding: EdgeInsets.only(bottom: controlsBottomInset),
+        return GestureDetector(
+          onTap: _togglePlayPause,
+          child: Center(
             child: AspectRatio(
               aspectRatio: controller.value.aspectRatio,
               child: VideoPlayer(controller),
@@ -1974,6 +2434,60 @@ class _MediaPreviewScreenState extends State<_MediaPreviewScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Botón de acción de la barra inferior con icono + etiqueta.
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool isDestructive;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isDestructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = isDestructive ? const Color(0xFFFF3B30) : Colors.white;
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: isDestructive
+                  ? const Color(0xFFFF3B30).withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isDestructive
+                    ? const Color(0xFFFF3B30).withValues(alpha: 0.55)
+                    : Colors.white.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: color.withValues(alpha: 0.9),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

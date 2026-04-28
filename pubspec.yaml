@@ -33,6 +33,7 @@ dependencies:
   intl: ^0.20.2
   shared_preferences: ^2.5.5
   cupertino_icons: ^1.0.9
+  share_plus: ^13.1.0
 
 dev_dependencies:
   flutter_test:
