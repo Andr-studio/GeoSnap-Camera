@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geosnap_cam/ui/theme/app_colors.dart';
 
 class ShutterButton extends StatefulWidget {
   final bool isVideoMode;
@@ -126,7 +127,7 @@ class _ShutterButtonState extends State<ShutterButton> {
                 width: widget.isRecording ? 34 : null,
                 height: widget.isRecording ? 34 : null,
                 decoration: BoxDecoration(
-                  color: videoVisual ? const Color(0xFFFF2D2D) : Colors.white,
+                  color: videoVisual ? AppColors.recordingRed : Colors.white,
                   borderRadius: BorderRadius.circular(
                     widget.isRecording ? 8 : 40,
                   ),

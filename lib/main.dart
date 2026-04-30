@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/di/service_locator.dart';
+import 'ui/theme/app_theme.dart';
 import 'ui/screens/splash_screen.dart';
-import 'ui/screens/camera_screen.dart';
+import 'ui/screens/camera/camera_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,15 +26,7 @@ class MainApp extends StatelessWidget {
     return MaterialApp(
       title: 'GeoSnap Cam',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'Roboto', // Defaulting to Roboto as defined in pubspec
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1D1D1F),
-          primary: const Color(0xFF1D1D1F),
-          surface: const Color(0xFFF8F9FA),
-        ),
-      ),
+      theme: AppTheme.lightTheme,
       home: const SplashScreen(mainApp: CameraScreen()),
     );
   }

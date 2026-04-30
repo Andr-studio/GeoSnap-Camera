@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/services/permission_service.dart';
+import '../theme/app_colors.dart';
 
 class PermissionScreen extends StatefulWidget {
   final VoidCallback? onGranted;
@@ -74,7 +75,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA), // Ceramic White base
+      backgroundColor: AppColors.appSurface,
       body: Stack(
         children: [
           // Background accents (subtle soft gradients)
@@ -103,7 +104,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                       letterSpacing: -1,
-                      color: Color(0xFF1D1D1F), // Apple Dark Gray
+                      color: AppColors.primaryDark,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -111,7 +112,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                     'Captura tus momentos con precisión. Para empezar, necesitamos algunos permisos.',
                     style: TextStyle(
                       fontSize: 17,
-                      color: Color(0xFF86868B), // Apple Light Gray
+                      color: AppColors.appleTextSecondary,
                       height: 1.4,
                     ),
                   ),
@@ -214,10 +215,10 @@ class _PermissionCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF2F2F7),
+                    color: AppColors.appleSystemFill,
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(icon, color: const Color(0xFF007AFF), size: 28),
+                  child: Icon(icon, color: AppColors.appleBlue, size: 28),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -229,7 +230,7 @@ class _PermissionCard extends StatelessWidget {
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF1D1D1F),
+                          color: AppColors.primaryDark,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -237,7 +238,7 @@ class _PermissionCard extends StatelessWidget {
                         description,
                         style: const TextStyle(
                           fontSize: 14,
-                          color: Color(0xFF86868B),
+                          color: AppColors.appleTextSecondary,
                         ),
                       ),
                     ],
@@ -271,7 +272,7 @@ class _PremiumButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: loading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF1D1D1F),
+          backgroundColor: AppColors.primaryDark,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),

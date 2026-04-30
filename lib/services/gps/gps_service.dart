@@ -123,7 +123,10 @@ class GpsService {
 
   Future<_AddressResult> _resolveAddress(double lat, double lon) async {
     try {
-      final List<Placemark> placemarks = await placemarkFromCoordinates(lat, lon);
+      final List<Placemark> placemarks = await placemarkFromCoordinates(
+        lat,
+        lon,
+      );
       if (placemarks.isEmpty) return const _AddressResult();
 
       final Placemark place = placemarks.first;

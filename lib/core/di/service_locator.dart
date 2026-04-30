@@ -3,8 +3,9 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:geosnap_cam/core/services/permission_service.dart';
-import 'package:geosnap_cam/services/gps_service.dart';
-import 'package:geosnap_cam/services/watermark_service.dart';
+import 'package:geosnap_cam/services/gps/gps_service.dart';
+import 'package:geosnap_cam/services/watermark/map_tile_service.dart';
+import 'package:geosnap_cam/services/watermark/watermark_service.dart';
 
 final GetIt appLocator = GetIt.instance;
 
@@ -28,10 +29,14 @@ Future<void> configureDependencies() async {
     () => GpsService(httpClient: appLocator<http.Client>()),
   );
 
+  appLocator.registerLazySingleton<MapTileService>(
+    () => MapTileService(httpClient: appLocator<http.Client>()),
+  );
+
   appLocator.registerLazySingleton<WatermarkService>(
     () => WatermarkService(
       prefs: appLocator<SharedPreferences>(),
-      httpClient: appLocator<http.Client>(),
+      mapTileService: appLocator<MapTileService>(),
     ),
   );
 
