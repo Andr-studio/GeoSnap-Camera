@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:geosnap_cam/core/di/service_locator.dart';
 import 'package:geosnap_cam/services/gps/gps_service.dart';
+import 'package:geosnap_cam/data/repositories/watermark_settings_repository.dart';
 import 'package:geosnap_cam/services/watermark/watermark_service.dart';
 import 'package:geosnap_cam/ui/screens/watermark_settings/widgets/content_settings_group.dart';
 import 'package:geosnap_cam/ui/screens/watermark_settings/widgets/map_settings_group.dart';
@@ -21,6 +22,8 @@ class WatermarkSettingsScreen extends StatefulWidget {
 
 class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
   final WatermarkService _watermarkService = appLocator<WatermarkService>();
+  final WatermarkSettingsRepository _settingsRepo =
+      appLocator<WatermarkSettingsRepository>();
   WatermarkConfig _config = WatermarkConfig();
   bool _isLoading = true;
 
@@ -31,7 +34,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
   }
 
   Future<void> _loadConfig() async {
-    final WatermarkConfig config = await _watermarkService.getConfig();
+    final WatermarkConfig config = await _settingsRepo.getConfig();
     if (!mounted) return;
 
     setState(() {
@@ -46,7 +49,7 @@ class _WatermarkSettingsScreenState extends State<WatermarkSettingsScreen> {
     setState(() {
       _config = newConfig;
     });
-    await _watermarkService.saveConfig(newConfig);
+    await _settingsRepo.saveConfig(newConfig);
     await _prewarmAssets(newConfig);
   }
 

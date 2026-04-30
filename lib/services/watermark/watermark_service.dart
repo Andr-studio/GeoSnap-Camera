@@ -6,7 +6,8 @@ import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/error/result.dart';
+import '../../data/repositories/watermark_settings_repository.dart';
 
 import '../../ui/painters/watermark_painter.dart';
 import '../gps/gps_service.dart';
@@ -19,22 +20,18 @@ export '../../ui/painters/watermark_painter.dart';
 export 'watermark_config.dart';
 
 class WatermarkService {
-  final SharedPreferences _prefs;
+  final WatermarkSettingsRepository _settingsRepository;
   final MapTileService _mapTileService;
 
   WatermarkService({
-    required SharedPreferences prefs,
+    required WatermarkSettingsRepository settingsRepository,
     required MapTileService mapTileService,
-  }) : _prefs = prefs,
+  }) : _settingsRepository = settingsRepository,
        _mapTileService = mapTileService;
-
-  final ValueNotifier<WatermarkConfig> configNotifier = ValueNotifier(
-    WatermarkConfig(),
-  );
 
   static const double canvasWidth = 760.0;
 
-  Future<String> applyWatermark(
+  Future<Result<String, WatermarkFailure>> applyWatermark(
     String inputPath,
     bool isVideo,
     LocationData location, {
@@ -44,7 +41,7 @@ class WatermarkService {
       // ── Fase 1: paralelizar sonda de video y carga de config ──────────────
       final results = await Future.wait([
         FFprobeKit.getMediaInformation(inputPath),
-        getConfig(),
+        _settingsRepository.getConfig(),
       ]);
 
       final sessionInfo = results[0] as dynamic;
@@ -120,8 +117,8 @@ class WatermarkService {
           watermarkPath: watermarkFile.path,
           outputPath: resolvedOutputPath,
         );
-        if (success) return resolvedOutputPath;
-        return inputPath;
+        if (success) return Result.success(resolvedOutputPath);
+        return Result.failure(const WatermarkFailure('Video encoding failed'));
       }
 
       final String? photoOutputPath = await PhotoWatermarkProcessor.apply(
@@ -131,84 +128,16 @@ class WatermarkService {
         config: config,
         location: location,
       );
-      return photoOutputPath ?? inputPath;
+      if (photoOutputPath != null) {
+        return Result.success(photoOutputPath);
+      } else {
+        return Result.failure(const WatermarkFailure('Photo processing failed'));
+      }
     } catch (e) {
-      return inputPath;
+      return Result.failure(WatermarkFailure('An unexpected error occurred: $e', exception: e is Exception ? e : null));
     }
   }
 
-  Future<WatermarkConfig> getConfig() async {
-    final SharedPreferences prefs = _prefs;
-    final String mapType =
-        prefs.getString('wm_mapType') ?? WatermarkMapType.standard;
-    final double titleScale = prefs.getDouble('wm_titleScale') ?? 0.55;
-    final double textScale = prefs.getDouble('wm_textScale') ?? 0.65;
-    final double glassOpacity = prefs.getDouble('wm_glassOpacity') ?? 0.55;
-    final double glassWidth = prefs.getDouble('wm_glassWidth') ?? 1.0;
-    final int titleColorValue =
-        prefs.getInt('wm_titleColorValue') ?? 0xFFFFFFFF;
-    final int textColorValue = prefs.getInt('wm_textColorValue') ?? 0xFFFFFFFF;
-    final int glassColorValue =
-        prefs.getInt('wm_glassColorValue') ?? 0xFF070707;
-    final double mapAttributionScale =
-        prefs.getDouble('wm_mapAttributionScale') ?? 1.0;
-    final double mapAttributionOutlineWidth =
-        prefs.getDouble('wm_mapAttributionOutlineWidth') ??
-        ((prefs.getBool('wm_mapAttributionShadow') ?? true) ? 1.2 : 0.0);
-    final int mapAttributionColorValue =
-        prefs.getInt('wm_mapAttributionColorValue') ?? 0xFFFFFFFF;
-
-    final WatermarkConfig config = WatermarkConfig(
-      showDate: prefs.getBool('wm_showDate') ?? true,
-      showAddress: prefs.getBool('wm_showAddress') ?? true,
-      showCityCoords: prefs.getBool('wm_showCityCoords') ?? true,
-      mapType: WatermarkMapType.values.contains(mapType)
-          ? mapType
-          : WatermarkMapType.standard,
-      titleScale: titleScale.clamp(0.4, 1.6).toDouble(),
-      textScale: textScale.clamp(0.4, 1.6).toDouble(),
-      glassOpacity: glassOpacity.clamp(0.0, 1.0).toDouble(),
-      glassWidth: glassWidth.clamp(0.5, 1.0).toDouble(),
-      titleColorValue: titleColorValue,
-      textColorValue: textColorValue,
-      glassColorValue: glassColorValue,
-      mapAttributionScale: mapAttributionScale.clamp(0.7, 2.2).toDouble(),
-      mapAttributionOutlineWidth: mapAttributionOutlineWidth
-          .clamp(0.0, 4.0)
-          .toDouble(),
-      mapAttributionColorValue: mapAttributionColorValue,
-    );
-
-    configNotifier.value = config;
-    return config;
-  }
-
-  Future<void> saveConfig(WatermarkConfig config) async {
-    // Todas las escrituras en paralelo: ~10x más rápido que secuencial.
-    await Future.wait([
-      _prefs.setBool('wm_showDate', config.showDate),
-      _prefs.setBool('wm_showAddress', config.showAddress),
-      _prefs.setBool('wm_showCityCoords', config.showCityCoords),
-      _prefs.setString('wm_mapType', config.mapType),
-      _prefs.setDouble('wm_titleScale', config.titleScale),
-      _prefs.setDouble('wm_textScale', config.textScale),
-      _prefs.setDouble('wm_glassOpacity', config.glassOpacity),
-      _prefs.setDouble('wm_glassWidth', config.glassWidth),
-      _prefs.setInt('wm_titleColorValue', config.titleColorValue),
-      _prefs.setInt('wm_textColorValue', config.textColorValue),
-      _prefs.setInt('wm_glassColorValue', config.glassColorValue),
-      _prefs.setDouble('wm_mapAttributionScale', config.mapAttributionScale),
-      _prefs.setDouble(
-        'wm_mapAttributionOutlineWidth',
-        config.mapAttributionOutlineWidth,
-      ),
-      _prefs.setInt(
-        'wm_mapAttributionColorValue',
-        config.mapAttributionColorValue,
-      ),
-    ]);
-    configNotifier.value = config;
-  }
 
   ui.Image? getCachedMapImage(LocationData? location, WatermarkConfig config) {
     if (location == null) return null;

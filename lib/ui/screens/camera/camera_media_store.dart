@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:gal/gal.dart';
@@ -96,11 +97,18 @@ class CameraMediaStore {
     String finalPath = rawPath;
 
     if (location != null) {
-      finalPath = await _watermarkService.applyWatermark(
+      final result = await _watermarkService.applyWatermark(
         rawPath,
         mediaCapture.isVideo,
         location,
         outputPath: permanentPath,
+      );
+      finalPath = result.fold(
+        (failure) {
+          debugPrint('Watermark failed: ${failure.message}');
+          return rawPath; // fallback to original file
+        },
+        (path) => path,
       );
     } else {
       try {

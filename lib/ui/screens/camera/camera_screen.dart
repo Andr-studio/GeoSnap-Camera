@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geosnap_cam/core/di/service_locator.dart';
 import 'package:geosnap_cam/services/gps/gps_service.dart';
+import 'package:geosnap_cam/data/repositories/watermark_settings_repository.dart';
 import 'package:geosnap_cam/services/watermark/watermark_service.dart';
 import 'package:geosnap_cam/ui/screens/camera/camera_aspect_ratio_policy.dart';
 import 'package:geosnap_cam/ui/screens/camera/camera_controller.dart';
@@ -65,6 +66,8 @@ class _CameraScreenState extends State<CameraScreen>
 
   final GpsService _gpsService = appLocator<GpsService>();
   final WatermarkService _watermarkService = appLocator<WatermarkService>();
+  final WatermarkSettingsRepository _settingsRepo =
+      appLocator<WatermarkSettingsRepository>();
   late final CameraMediaStore _mediaStore = CameraMediaStore(
     watermarkService: _watermarkService,
   );
@@ -119,7 +122,7 @@ class _CameraScreenState extends State<CameraScreen>
     final loc = await _gpsService.getCurrentLocation();
     if (loc != null) {
       _lastKnownLocation = loc;
-      final WatermarkConfig config = await _watermarkService.getConfig();
+      final WatermarkConfig config = await _settingsRepo.getConfig();
       await _watermarkService.prewarmWatermarkAssets(loc, config);
       if (!_gpsReadyHapticPlayed) {
         _gpsReadyHapticPlayed = true;
@@ -720,7 +723,7 @@ class _CameraScreenState extends State<CameraScreen>
                           );
                           if (_lastKnownLocation != null) {
                             final WatermarkConfig config =
-                                await _watermarkService.getConfig();
+                                await _settingsRepo.getConfig();
                             await _watermarkService.prewarmWatermarkAssets(
                               _lastKnownLocation,
                               config,
