@@ -60,26 +60,36 @@ class WatermarkService {
             final h = stream.getHeight() ?? 1920;
             int finalW = w;
             int finalH = h;
+            int rotate = 0;
             final properties = stream.getAllProperties();
-            if (properties != null && properties['tags'] is Map) {
-              final tags = properties['tags'] as Map;
-              if (tags.containsKey('rotate')) {
-                final int rotate = int.tryParse(tags['rotate'].toString()) ?? 0;
-                if (rotate == 90 || rotate == 270) {
-                  finalW = h;
-                  finalH = w;
+            if (properties != null) {
+              if (properties['tags'] is Map) {
+                final tags = properties['tags'] as Map;
+                if (tags.containsKey('rotate')) {
+                  rotate = int.tryParse(tags['rotate'].toString()) ?? 0;
+                } else if (tags.containsKey('Orientation')) {
+                  final String ori = tags['Orientation'].toString();
+                  if (ori == '6' || ori == '8' || ori.contains('Right') || ori.contains('Left')) {
+                    rotate = 90;
+                  }
                 }
-              } else if (tags.containsKey('Orientation')) {
-                final String ori = tags['Orientation'].toString();
-                if (ori == '6' ||
-                    ori == '8' ||
-                    ori.contains('Right') ||
-                    ori.contains('Left')) {
-                  finalW = h;
-                  finalH = w;
+              }
+
+              if (rotate == 0 && properties['side_data_list'] is List) {
+                final sideDataList = properties['side_data_list'] as List;
+                for (var sideData in sideDataList) {
+                  if (sideData is Map && sideData.containsKey('rotation')) {
+                    rotate = (double.tryParse(sideData['rotation'].toString()) ?? 0).round().abs();
+                  }
                 }
               }
             }
+
+            if (rotate == 90 || rotate == 270 || rotate == -90 || rotate == -270) {
+              finalW = h;
+              finalH = w;
+            }
+
             isLandscape = finalW > finalH;
             videoW = finalW;
             videoH = finalH;
@@ -120,6 +130,8 @@ class WatermarkService {
           config: config,
           watermarkWidth: watermarkSize.width,
           watermarkHeight: watermarkSize.height,
+          videoWidth: videoW,
+          videoHeight: videoH,
         );
         if (success) return Result.success(resolvedOutputPath);
         return Result.failure(const WatermarkFailure('Video encoding failed'));
@@ -181,9 +193,7 @@ class WatermarkService {
       mapType: config.mapType,
     );
 
-    final double baseW = isVideo && isLandscape
-        ? 1013.0
-        : WatermarkService.canvasWidth;
+    final double baseW = WatermarkService.canvasWidth;
     final double canvasW = baseW * config.effectiveGlassWidth;
 
     final Size size = WatermarkPainter.measureSize(

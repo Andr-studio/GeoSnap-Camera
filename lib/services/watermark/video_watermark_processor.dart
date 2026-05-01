@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
@@ -13,16 +15,28 @@ class VideoWatermarkProcessor {
     required WatermarkConfig config,
     required double watermarkWidth,
     required double watermarkHeight,
+    required int videoWidth,
+    required int videoHeight,
   }) async {
     final double widthFactor = config.effectiveGlassWidth.clamp(0.42, 0.76).toDouble();
-    final double aspectMultiplier = watermarkHeight / watermarkWidth;
-    final double heightFactor = widthFactor * aspectMultiplier;
+    
+    // Al usar el minimo entre ancho y alto, garantizamos que en videos 9:16 (verticales) 
+    // la marca de agua tome exactamente el 76% del ancho (ej. 1080). Si el video tiene 
+    // metadatos de rotacion corruptos y FFmpeg cree que es 1920x1080, el minimo seguira 
+    // siendo 1080, evitando que la marca de agua se dimensione a 1459px y cubra toda la pantalla.
+    final int safeBaseWidth = math.min(videoWidth, videoHeight);
+    int targetWmWidth = (safeBaseWidth * widthFactor).round();
+    int targetWmHeight = (targetWmWidth * (watermarkHeight / watermarkWidth)).round();
+    
+    // Forzar numeros pares para evitar errores en h264_mediacodec
+    if (targetWmWidth % 2 != 0) targetWmWidth -= 1;
+    if (targetWmHeight % 2 != 0) targetWmHeight -= 1;
 
-    // Use main_w for both width and height to guarantee aspect ratio is preserved perfectly.
-    // The division by 2 and multiplication by 2 ensures the output height is an even number,
-    // which is required by h264_mediacodec to prevent encoding errors.
     final String filterComplex =
-        "[1:v][0:v]scale2ref=w='trunc(main_w*$widthFactor/2)*2':h='trunc(main_w*$heightFactor/2)*2'[wm][vid];[vid][wm]overlay=(W-w)/2:H-h-(H*0.02)[out]";
+        "[1:v]scale=$targetWmWidth:$targetWmHeight[wm];"
+        "[0:v][wm]overlay=(main_w-overlay_w)/2:main_h-overlay_h-(main_h*0.02),"
+        "crop='trunc(iw/16)*16':'trunc(ih/16)*16',"
+        "format=yuv420p[out]";
 
     final String hwCommand =
         '-y -i "$inputPath" -i "$watermarkPath" '
