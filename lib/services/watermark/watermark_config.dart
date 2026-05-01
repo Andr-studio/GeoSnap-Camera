@@ -6,12 +6,21 @@ class WatermarkMapType {
   static const List<String> values = <String>[standard, satellite, terrain];
 }
 
+class WatermarkTemplateType {
+  static const String crystal = 'crystal';
+  static const String pill = 'pill';
+  static const String cinema = 'cinema';
+
+  static const List<String> values = <String>[crystal, pill, cinema];
+}
+
 class WatermarkConfig {
   static const double widthScaleFactor = 0.85;
 
   final bool showDate;
   final bool showAddress;
   final bool showCityCoords;
+  final String template;
   final String mapType;
   final double titleScale;
   final double textScale;
@@ -28,6 +37,7 @@ class WatermarkConfig {
     this.showDate = true,
     this.showAddress = true,
     this.showCityCoords = true,
+    this.template = WatermarkTemplateType.crystal,
     this.mapType = WatermarkMapType.standard,
     this.titleScale = 0.55,
     this.textScale = 0.65,
@@ -47,6 +57,7 @@ class WatermarkConfig {
     bool? showDate,
     bool? showAddress,
     bool? showCityCoords,
+    String? template,
     String? mapType,
     double? titleScale,
     double? textScale,
@@ -63,6 +74,7 @@ class WatermarkConfig {
       showDate: showDate ?? this.showDate,
       showAddress: showAddress ?? this.showAddress,
       showCityCoords: showCityCoords ?? this.showCityCoords,
+      template: template ?? this.template,
       mapType: mapType ?? this.mapType,
       titleScale: titleScale ?? this.titleScale,
       textScale: textScale ?? this.textScale,

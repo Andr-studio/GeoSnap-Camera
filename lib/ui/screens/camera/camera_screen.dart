@@ -247,13 +247,22 @@ class _CameraScreenState extends State<CameraScreen>
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => MediaPreviewScreen(
+      PageRouteBuilder<void>(
+        opaque: false,
+        transitionDuration: const Duration(milliseconds: 250),
+        reverseTransitionDuration: const Duration(milliseconds: 250),
+        pageBuilder: (_, __, ___) => MediaPreviewScreen(
           mediaPath: path,
           isVideo: _lastCaptureIsVideo,
           sessionPaths: List<String>.from(_sessionPaths),
           sessionIsVideo: List<bool>.from(_sessionIsVideo),
         ),
+        transitionsBuilder: (_, Animation<double> animation, __, Widget child) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
       ),
     );
   }

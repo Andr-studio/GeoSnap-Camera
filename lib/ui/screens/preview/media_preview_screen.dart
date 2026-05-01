@@ -49,6 +49,13 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen>
   bool _chromeVisible = true;
   Timer? _autohideTimer;
 
+  // Swipe to dismiss state
+  double _dragY = 0.0;
+  double _dragScale = 1.0;
+  late AnimationController _snapBackController;
+  Animation<double>? _snapBackYAnimation;
+  Animation<double>? _snapBackScaleAnimation;
+
   @override
   void initState() {
     super.initState();
@@ -66,12 +73,24 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen>
       initialPage: _activeIndex >= 0 ? _activeIndex : 0,
     );
 
+    _snapBackController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    )..addListener(() {
+        if (!mounted) return;
+        setState(() {
+          _dragY = _snapBackYAnimation?.value ?? 0.0;
+          _dragScale = _snapBackScaleAnimation?.value ?? 1.0;
+        });
+      });
+
     _initMedia(_currentPath, _currentIsVideo);
     _scheduleAutohide();
   }
 
   @override
   void dispose() {
+    _snapBackController.dispose();
     _autohideTimer?.cancel();
     _progressTimer?.cancel();
     _videoController?.dispose();
@@ -241,48 +260,91 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen>
     _scheduleAutohide();
   }
 
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    setState(() {
+      _dragY += details.delta.dy;
+      // Scale shrinks from 1.0 down to 0.7 max as drag increases
+      final double progress = (_dragY.abs() / 400.0).clamp(0.0, 1.0);
+      _dragScale = 1.0 - (progress * 0.3);
+
+      if (_chromeVisible) {
+        _chromeVisible = false;
+        _autohideTimer?.cancel();
+      }
+    });
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    final double velocityY = details.velocity.pixelsPerSecond.dy;
+    // Thresholds: dragged more than 150px OR flicked fast
+    if (_dragY.abs() > 150.0 || velocityY.abs() > 800) {
+      Navigator.of(context).pop();
+    } else {
+      // Snap back animation
+      _snapBackYAnimation = Tween<double>(begin: _dragY, end: 0).animate(
+        CurvedAnimation(parent: _snapBackController, curve: Curves.easeOut),
+      );
+      _snapBackScaleAnimation = Tween<double>(begin: _dragScale, end: 1.0).animate(
+        CurvedAnimation(parent: _snapBackController, curve: Curves.easeOut),
+      );
+
+      _snapBackController.forward(from: 0);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final double bottomPadding = MediaQuery.of(context).padding.bottom;
     final bool hasSession = widget.sessionPaths.length > 1;
 
+    // Background opacity fades out slightly as we drag
+    final double bgOpacity = (1.0 - (_dragY.abs() / 500.0)).clamp(0.0, 1.0);
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.black.withValues(alpha: bgOpacity),
       extendBodyBehindAppBar: true,
       appBar: _buildAppBar(),
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _toggleChrome,
-        child: Stack(
-          children: <Widget>[
-            Positioned.fill(
-              child: MediaCarousel(
-                pageController: _pageController,
-                sessionPaths: widget.sessionPaths,
-                sessionIsVideo: widget.sessionIsVideo,
-                activeIndex: _activeIndex,
-                currentPath: _currentPath,
-                currentIsVideo: _currentIsVideo,
-                videoController: _videoController,
-                videoInitFuture: _videoInitFuture,
-                onPageChanged: _handlePageChanged,
-                onVideoTap: _togglePlayPause,
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: AnimatedOpacity(
-                opacity: _chromeVisible ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 260),
-                child: IgnorePointer(
-                  ignoring: !_chromeVisible,
-                  child: _buildBottomChrome(bottomPadding, hasSession),
+        child: Transform.translate(
+          offset: Offset(0, _dragY),
+          child: Transform.scale(
+            scale: _dragScale,
+            child: Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: MediaCarousel(
+                    pageController: _pageController,
+                    sessionPaths: widget.sessionPaths,
+                    sessionIsVideo: widget.sessionIsVideo,
+                    activeIndex: _activeIndex,
+                    currentPath: _currentPath,
+                    currentIsVideo: _currentIsVideo,
+                    videoController: _videoController,
+                    videoInitFuture: _videoInitFuture,
+                    onPageChanged: _handlePageChanged,
+                    onVideoTap: _togglePlayPause,
+                    onVerticalDragUpdate: _onVerticalDragUpdate,
+                    onVerticalDragEnd: _onVerticalDragEnd,
+                  ),
                 ),
-              ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: AnimatedOpacity(
+                    opacity: _chromeVisible ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 260),
+                    child: IgnorePointer(
+                      ignoring: !_chromeVisible,
+                      child: _buildBottomChrome(bottomPadding, hasSession),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

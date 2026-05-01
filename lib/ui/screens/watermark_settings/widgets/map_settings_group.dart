@@ -59,6 +59,7 @@ class MapSettingsGroup extends StatelessWidget {
           colors: const <Color>[
             Colors.white,
             Colors.black,
+            Color(0x00000000), // Multi-color logo option
             Color(0xFF4285F4),
             Color(0xFF34A853),
             Color(0xFFFBBC05),

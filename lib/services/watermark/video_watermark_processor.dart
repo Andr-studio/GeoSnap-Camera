@@ -1,6 +1,8 @@
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
+import '../../services/watermark/watermark_config.dart';
+
 class VideoWatermarkProcessor {
   /// Codifica el video con la marca de agua superpuesta.
   /// Intenta primero `h264_mediacodec` y cae en `libx264` si falla.
@@ -8,9 +10,19 @@ class VideoWatermarkProcessor {
     required String inputPath,
     required String watermarkPath,
     required String outputPath,
+    required WatermarkConfig config,
+    required double watermarkWidth,
+    required double watermarkHeight,
   }) async {
-    const String filterComplex =
-        "[1:v][0:v]scale2ref=w='main_w*min(iw,ih)/2280':h='main_h*min(iw,ih)/2280'[wm][vid];[vid][wm]overlay=(W-w)/2:H-h-(H*0.02)[out]";
+    final double widthFactor = config.effectiveGlassWidth.clamp(0.42, 0.76).toDouble();
+    final double aspectMultiplier = watermarkHeight / watermarkWidth;
+    final double heightFactor = widthFactor * aspectMultiplier;
+
+    // Use main_w for both width and height to guarantee aspect ratio is preserved perfectly.
+    // The division by 2 and multiplication by 2 ensures the output height is an even number,
+    // which is required by h264_mediacodec to prevent encoding errors.
+    final String filterComplex =
+        "[1:v][0:v]scale2ref=w='trunc(main_w*$widthFactor/2)*2':h='trunc(main_w*$heightFactor/2)*2'[wm][vid];[vid][wm]overlay=(W-w)/2:H-h-(H*0.02)[out]";
 
     final String hwCommand =
         '-y -i "$inputPath" -i "$watermarkPath" '

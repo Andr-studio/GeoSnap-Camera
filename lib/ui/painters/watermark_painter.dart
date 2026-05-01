@@ -61,50 +61,93 @@ class WatermarkPainter extends CustomPainter {
       Rect.fromLTWH(0, 0, measured.actualTotalWidth, measured.totalHeight),
       const Radius.circular(24),
     );
-    final Color glassColor = Color(config.glassColorValue);
-    final double glassAlpha = config.glassOpacity.clamp(0.0, 1.0).toDouble();
-    final Paint bgPaint = Paint()
-      ..shader = ui.Gradient.linear(
-        const Offset(0, 0),
-        Offset(0, size.height),
-        [
-          glassColor.withValues(alpha: glassAlpha * 0.62),
-          Colors.black.withValues(alpha: glassAlpha * 0.72),
-          glassColor.withValues(alpha: glassAlpha * 0.36),
-        ],
-        [0.0, 0.52, 1.0],
-      )
-      ..style = PaintingStyle.fill;
 
-    final Paint waterGlowPaint = Paint()
-      ..shader = ui.Gradient.linear(
-        const Offset(0, 0),
-        Offset(measured.actualTotalWidth, measured.totalHeight),
-        [
-          Colors.white.withValues(alpha: glassAlpha * 0.20),
-          glassColor.withValues(alpha: glassAlpha * 0.12),
-          Colors.transparent,
-        ],
-        [0.0, 0.36, 1.0],
-      )
-      ..style = PaintingStyle.fill;
+    final bool isPill = config.template == WatermarkTemplateType.pill;
+    final bool isCinema = config.template == WatermarkTemplateType.cinema;
+    final bool isCrystal = config.template == WatermarkTemplateType.crystal;
 
-    final Paint borderPaint = Paint()
-      ..color = Colors.white.withValues(alpha: glassAlpha * 0.22)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
+    if (isPill) {
+      final Paint bgPaint = Paint()
+        ..color = const Color(0xFFFDFDFD)
+        ..style = PaintingStyle.fill;
+      final Paint borderPaint = Paint()
+        ..color = const Color(0xFFE0E0E0)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+      canvas.drawRRect(glassRRect, bgPaint);
+      canvas.drawRRect(glassRRect, borderPaint);
+    } else if (isCinema) {
+      final Paint bgPaint = Paint()
+        ..color = const Color(0xFF0A0A0A)
+        ..style = PaintingStyle.fill;
+      final Paint redGlow = Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(measured.actualTotalWidth / 2, measured.totalHeight / 2),
+          measured.actualTotalWidth * 0.8,
+          [
+            const Color(0x33E50914),
+            const Color(0x00E50914),
+          ],
+        )
+        ..style = PaintingStyle.fill;
+      final Paint borderPaint = Paint()
+        ..color = const Color(0xFFE50914).withValues(alpha: 0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0;
 
-    canvas.drawRRect(glassRRect, bgPaint);
-    canvas.drawRRect(glassRRect, waterGlowPaint);
-    canvas.drawRRect(glassRRect, borderPaint);
+      canvas.drawRRect(glassRRect, bgPaint);
+      canvas.drawRRect(glassRRect, redGlow);
+      canvas.drawRRect(glassRRect, borderPaint);
+    } else {
+      // Crystal Glass
+      final Color glassColor = Color(config.glassColorValue);
+      final double glassAlpha = config.glassOpacity.clamp(0.0, 1.0).toDouble();
+      
+      final Paint bgPaint = Paint()
+        ..shader = ui.Gradient.linear(
+          const Offset(0, 0),
+          Offset(0, size.height),
+          [
+            glassColor.withValues(alpha: glassAlpha * 0.62),
+            Colors.black.withValues(alpha: glassAlpha * 0.72),
+            glassColor.withValues(alpha: glassAlpha * 0.36),
+          ],
+          [0.0, 0.52, 1.0],
+        )
+        ..style = PaintingStyle.fill;
+
+      final Paint waterGlowPaint = Paint()
+        ..shader = ui.Gradient.linear(
+          const Offset(0, 0),
+          Offset(measured.actualTotalWidth, measured.totalHeight),
+          [
+            Colors.white.withValues(alpha: glassAlpha * 0.20),
+            glassColor.withValues(alpha: glassAlpha * 0.12),
+            Colors.transparent,
+          ],
+          [0.0, 0.36, 1.0],
+        )
+        ..style = PaintingStyle.fill;
+
+      final Paint borderPaint = Paint()
+        ..color = Colors.white.withValues(alpha: glassAlpha * 0.22)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+
+      canvas.drawRRect(glassRRect, bgPaint);
+      canvas.drawRRect(glassRRect, waterGlowPaint);
+      canvas.drawRRect(glassRRect, borderPaint);
+    }
+
+    final double mapX = _padding;
 
     final Rect mapRect = Rect.fromLTWH(
-      _padding,
+      mapX,
       _padding,
       measured.mapWidth,
       measured.innerHeight,
     );
-    _drawMap(canvas, mapRect);
+    _drawMap(canvas, mapRect, isCinema: isCinema);
 
     final double contentX = _padding + measured.mapWidth + _horizontalGap;
     final double textMaxWidth = measured.contentWidth;
@@ -113,31 +156,40 @@ class WatermarkPainter extends CustomPainter {
     y = _paintParagraph(
       canvas,
       text: measured.title,
-      style: measured.titleStyle,
+      style: isPill ? measured.titleStyle.copyWith(color: Colors.black) : measured.titleStyle,
       x: contentX,
       y: y,
       maxWidth: textMaxWidth,
+      isPill: isPill,
+      pillColor: null,
     );
 
     y += measured.titleDividerGap;
     final Paint dividerPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.18)
+      ..color = isPill ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.18)
       ..strokeWidth = 1.0;
-    canvas.drawLine(
-      Offset(contentX, y),
-      Offset(contentX + textMaxWidth, y),
-      dividerPaint,
-    );
+    
+    if (!isCrystal && !isPill) {
+      canvas.drawLine(
+        Offset(contentX, y),
+        Offset(contentX + textMaxWidth, y),
+        dividerPaint,
+      );
+    }
     y += measured.titleDividerGap;
+
+    final TextStyle bodyText = isPill ? measured.bodyStyle.copyWith(color: Colors.black87) : measured.bodyStyle;
 
     if (config.showAddress) {
       y = _paintParagraph(
         canvas,
         text: measured.addressLine,
-        style: measured.bodyStyle,
+        style: bodyText,
         x: contentX,
         y: y,
         maxWidth: textMaxWidth,
+        isPill: isPill,
+        pillColor: const Color(0xFFFFEBEB),
       );
       y += measured.lineGap;
     }
@@ -146,10 +198,12 @@ class WatermarkPainter extends CustomPainter {
       y = _paintParagraph(
         canvas,
         text: measured.coordsLine,
-        style: measured.bodyStyle,
+        style: bodyText,
         x: contentX,
         y: y,
         maxWidth: textMaxWidth,
+        isPill: isPill,
+        pillColor: const Color(0xFFFFEBEB),
       );
       y += measured.lineGap;
     }
@@ -158,21 +212,25 @@ class WatermarkPainter extends CustomPainter {
       y = _paintParagraph(
         canvas,
         text: measured.dateLine,
-        style: measured.bodyStyle,
+        style: bodyText,
         x: contentX,
         y: y,
         maxWidth: textMaxWidth,
+        isPill: isPill,
+        pillColor: const Color(0xFFE3F2FD),
       );
     }
 
     final double weatherTop =
         _padding + measured.innerHeight - measured.weatherRowHeight;
 
-    canvas.drawLine(
-      Offset(contentX, weatherTop - measured.weatherDividerGap),
-      Offset(contentX + textMaxWidth, weatherTop - measured.weatherDividerGap),
-      dividerPaint,
-    );
+    if (!isCrystal && !isPill) {
+      canvas.drawLine(
+        Offset(contentX, weatherTop - measured.weatherDividerGap),
+        Offset(contentX + textMaxWidth, weatherTop - measured.weatherDividerGap),
+        dividerPaint,
+      );
+    }
 
     _drawMetricRow(
       canvas,
@@ -180,10 +238,11 @@ class WatermarkPainter extends CustomPainter {
       y: weatherTop,
       maxWidth: textMaxWidth,
       measured: measured,
+      isPill: isPill,
     );
   }
 
-  void _drawMap(Canvas canvas, Rect rect) {
+  void _drawMap(Canvas canvas, Rect rect, {required bool isCinema}) {
     final RRect mapRRect = RRect.fromRectAndRadius(
       rect,
       const Radius.circular(16),
@@ -231,7 +290,7 @@ class WatermarkPainter extends CustomPainter {
     _drawMapAttribution(canvas, rect);
 
     final Offset center = Offset(rect.center.dx, rect.center.dy);
-    final Paint pinPaint = Paint()..color = AppColors.destructive;
+    final Paint pinPaint = Paint()..color = isCinema ? const Color(0xFFE50914) : AppColors.destructive;
     canvas.drawCircle(center, 10, pinPaint);
     canvas.drawCircle(center, 4, Paint()..color = Colors.white);
 
@@ -240,18 +299,37 @@ class WatermarkPainter extends CustomPainter {
 
   void _drawMapAttribution(Canvas canvas, Rect rect) {
     final Color color = Color(config.mapAttributionColorValue);
+    final bool isMultiColor = config.mapAttributionColorValue == 0;
+
     final double scale = config.mapAttributionScale.clamp(0.7, 2.2).toDouble();
     final double outlineWidth = config.mapAttributionOutlineWidth
         .clamp(0.0, 4.0)
         .toDouble();
-    final TextStyle fillStyle = TextStyle(
-      color: color,
+    final TextStyle baseStyle = TextStyle(
       fontSize: 13 * scale,
       fontWeight: FontWeight.w700,
       fontFamily: 'Roboto',
     );
+
+    final TextSpan textSpan;
+    if (isMultiColor) {
+      textSpan = TextSpan(
+        style: baseStyle,
+        children: <TextSpan>[
+          TextSpan(text: 'G', style: TextStyle(color: const Color(0xFF4285F4))),
+          TextSpan(text: 'o', style: TextStyle(color: const Color(0xFFEA4335))),
+          TextSpan(text: 'o', style: TextStyle(color: const Color(0xFFFBBC05))),
+          TextSpan(text: 'g', style: TextStyle(color: const Color(0xFF4285F4))),
+          TextSpan(text: 'l', style: TextStyle(color: const Color(0xFF34A853))),
+          TextSpan(text: 'e', style: TextStyle(color: const Color(0xFFEA4335))),
+        ],
+      );
+    } else {
+      textSpan = TextSpan(text: 'Google', style: baseStyle.copyWith(color: color));
+    }
+
     final TextPainter tp = TextPainter(
-      text: TextSpan(text: 'Google', style: fillStyle),
+      text: textSpan,
       textDirection: ui.TextDirection.ltr,
       maxLines: 1,
     );
@@ -299,6 +377,8 @@ class WatermarkPainter extends CustomPainter {
     required double x,
     required double y,
     required double maxWidth,
+    required bool isPill,
+    required Color? pillColor,
   }) {
     final TextPainter tp = TextPainter(
       text: TextSpan(text: text, style: style),
@@ -306,6 +386,15 @@ class WatermarkPainter extends CustomPainter {
       maxLines: null,
     );
     tp.layout(maxWidth: maxWidth);
+
+    if (isPill && pillColor != null) {
+      final RRect bgRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x - 8, y - 4, tp.width + 16, tp.height + 8),
+        const Radius.circular(8),
+      );
+      canvas.drawRRect(bgRect, Paint()..color = pillColor);
+    }
+
     tp.paint(canvas, Offset(x, y));
     return y + tp.height;
   }
@@ -316,6 +405,7 @@ class WatermarkPainter extends CustomPainter {
     required double y,
     required double maxWidth,
     required _MeasuredLayout measured,
+    required bool isPill,
   }) {
     final List<String> metrics = <String>[
       '☁️ ${measured.temperatureLabel}',
@@ -323,16 +413,34 @@ class WatermarkPainter extends CustomPainter {
       '☀️ UV ${measured.uvLabel}',
     ];
 
+    final List<Color> pillColors = const <Color>[
+      Color(0xFFE8F5E9), // Light green
+      Color(0xFFE3F2FD), // Light blue
+      Color(0xFFFFF3E0), // Light orange
+    ];
+
     final double eachWidth = maxWidth / 3;
+    final TextStyle style = isPill ? measured.metricStyle.copyWith(color: Colors.black87) : measured.metricStyle;
+    
     for (int i = 0; i < metrics.length; i++) {
       final TextPainter tp = TextPainter(
-        text: TextSpan(text: metrics[i], style: measured.metricStyle),
+        text: TextSpan(text: metrics[i], style: style),
         textDirection: ui.TextDirection.ltr,
         maxLines: 1,
         ellipsis: '…',
       );
       tp.layout(maxWidth: eachWidth - 6);
-      tp.paint(canvas, Offset(contentX + eachWidth * i, y));
+      
+      final double dx = contentX + eachWidth * i;
+      if (isPill) {
+        final RRect bgRect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(dx - 6, y - 4, tp.width + 12, tp.height + 8),
+          const Radius.circular(8),
+        );
+        canvas.drawRRect(bgRect, Paint()..color = pillColors[i]);
+      }
+      
+      tp.paint(canvas, Offset(dx, y));
     }
   }
 
@@ -427,8 +535,9 @@ class WatermarkPainter extends CustomPainter {
     final double actualTotalWidth =
         _padding + mapWidth + _horizontalGap + contentWidth + _padding;
 
-    final double titleDividerGap = 10 * layoutS;
-    final double lineGap = 5 * s;
+    final bool isPill = config.template == WatermarkTemplateType.pill;
+    final double titleDividerGap = isPill ? 14 * layoutS : 10 * layoutS;
+    final double lineGap = isPill ? 14 * s : 5 * s;
 
     double textBlockHeight = 0;
     textBlockHeight += _textHeight(title, titleStyle, contentWidth);
@@ -627,6 +736,7 @@ class WatermarkPainter extends CustomPainter {
         oldDelegate.config.showAddress != config.showAddress ||
         oldDelegate.config.showCityCoords != config.showCityCoords ||
         oldDelegate.config.mapType != config.mapType ||
+        oldDelegate.config.template != config.template ||
         oldDelegate.config.titleScale != config.titleScale ||
         oldDelegate.config.textScale != config.textScale ||
         oldDelegate.config.glassOpacity != config.glassOpacity ||

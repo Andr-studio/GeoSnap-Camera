@@ -75,13 +75,23 @@ class ColorPickerTile extends StatelessWidget {
                   ),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: color,
+                      color: color.toARGB32() == 0 ? null : color,
+                      gradient: color.toARGB32() == 0 ? const SweepGradient(
+                        colors: [
+                          Color(0xFF4285F4),
+                          Color(0xFFEA4335),
+                          Color(0xFFFBBC05),
+                          Color(0xFF34A853),
+                          Color(0xFF4285F4),
+                        ],
+                      ) : null,
                       shape: BoxShape.circle,
                       boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.24),
-                          blurRadius: 12,
-                        ),
+                        if (color.toARGB32() != 0)
+                          BoxShadow(
+                            color: color.withValues(alpha: 0.24),
+                            blurRadius: 12,
+                          ),
                       ],
                     ),
                   ),

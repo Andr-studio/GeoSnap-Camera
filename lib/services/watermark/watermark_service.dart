@@ -88,8 +88,7 @@ class WatermarkService {
         }
       }
 
-      // ── Fase 2: generar marca de agua ya dimensionada al video ────────────
-      final File watermarkFile = await _createWatermarkImage(
+      final watermarkResult = await _createWatermarkImage(
         location,
         config,
         isLandscape,
@@ -97,6 +96,8 @@ class WatermarkService {
         videoWidth: videoW,
         videoHeight: videoH,
       );
+      final File watermarkFile = watermarkResult.file;
+      final Size watermarkSize = watermarkResult.size;
 
       // Use caller-supplied outputPath (permanent dir) or fall back to temp.
       final String resolvedOutputPath;
@@ -116,6 +117,9 @@ class WatermarkService {
           inputPath: inputPath,
           watermarkPath: watermarkFile.path,
           outputPath: resolvedOutputPath,
+          config: config,
+          watermarkWidth: watermarkSize.width,
+          watermarkHeight: watermarkSize.height,
         );
         if (success) return Result.success(resolvedOutputPath);
         return Result.failure(const WatermarkFailure('Video encoding failed'));
@@ -160,7 +164,7 @@ class WatermarkService {
     );
   }
 
-  Future<File> _createWatermarkImage(
+  Future<({File file, Size size})> _createWatermarkImage(
     LocationData location,
     WatermarkConfig config,
     bool isLandscape,
@@ -223,6 +227,6 @@ class WatermarkService {
     );
     await imgFile.writeAsBytes(byteData!.buffer.asUint8List());
 
-    return imgFile;
+    return (file: imgFile, size: scaledSize);
   }
 }

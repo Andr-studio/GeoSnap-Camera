@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:geosnap_cam/services/watermark/watermark_service.dart';
 
 import 'settings_section_wrapper.dart';
@@ -16,9 +17,79 @@ class StyleSettingsGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SettingsSectionWrapper(
-      title: 'Apariencia',
-      children: <Widget>[
+    return Column(
+      children: [
+        SettingsSectionWrapper(
+          title: 'Plantilla de Diseno',
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      const SettingIconBubble(icon: CupertinoIcons.sparkles),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const <Widget>[
+                            Text(
+                              'Estilo visual',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'Elige la plantilla de la marca de agua',
+                              style: TextStyle(
+                                color: Color(0x73FFFFFF),
+                                fontSize: 12,
+                                height: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  CupertinoSlidingSegmentedControl<String>(
+                    groupValue: config.template,
+                    backgroundColor: Colors.white.withValues(alpha: 0.08),
+                    thumbColor: AppColors.settingsAccent,
+                    children: const <String, Widget>{
+                      WatermarkTemplateType.crystal: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                        child: Text('Cristal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      ),
+                      WatermarkTemplateType.pill: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                        child: Text('Pildora', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      ),
+                      WatermarkTemplateType.cinema: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                        child: Text('Cine', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      ),
+                    },
+                    onValueChanged: (String? value) {
+                      if (value == null) return;
+                      onConfigChanged(config.copyWith(template: value));
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SettingsSectionWrapper(
+          title: 'Apariencia',
+          children: <Widget>[
         SliderSettingTile(
           icon: CupertinoIcons.textformat_size,
           title: 'Tamano del titulo',
@@ -104,6 +175,8 @@ class StyleSettingsGroup extends StatelessWidget {
           onSelected: (Color color) {
             onConfigChanged(config.copyWith(textColorValue: color.toARGB32()));
           },
+        ),
+          ],
         ),
       ],
     );

@@ -14,6 +14,7 @@ class WatermarkSettingsRepository {
 
   Future<WatermarkConfig> getConfig() async {
     final SharedPreferences prefs = _prefs;
+    final String template = prefs.getString('wm_template') ?? WatermarkTemplateType.crystal;
     final String mapType =
         prefs.getString('wm_mapType') ?? WatermarkMapType.standard;
     final double titleScale = prefs.getDouble('wm_titleScale') ?? 0.55;
@@ -37,6 +38,9 @@ class WatermarkSettingsRepository {
       showDate: prefs.getBool('wm_showDate') ?? true,
       showAddress: prefs.getBool('wm_showAddress') ?? true,
       showCityCoords: prefs.getBool('wm_showCityCoords') ?? true,
+      template: WatermarkTemplateType.values.contains(template)
+          ? template
+          : WatermarkTemplateType.crystal,
       mapType: WatermarkMapType.values.contains(mapType)
           ? mapType
           : WatermarkMapType.standard,
@@ -63,6 +67,7 @@ class WatermarkSettingsRepository {
       _prefs.setBool('wm_showDate', config.showDate),
       _prefs.setBool('wm_showAddress', config.showAddress),
       _prefs.setBool('wm_showCityCoords', config.showCityCoords),
+      _prefs.setString('wm_template', config.template),
       _prefs.setString('wm_mapType', config.mapType),
       _prefs.setDouble('wm_titleScale', config.titleScale),
       _prefs.setDouble('wm_textScale', config.textScale),
