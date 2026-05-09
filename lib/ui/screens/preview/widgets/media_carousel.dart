@@ -91,6 +91,7 @@ class _MediaCarouselState extends State<MediaCarousel> {
       child: Image.file(
         File(path),
         fit: BoxFit.contain,
+        cacheWidth: 1080,
         errorBuilder: (_, __, ___) => const Center(
           child: Text(
             'No se pudo cargar la imagen',

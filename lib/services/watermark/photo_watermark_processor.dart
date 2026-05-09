@@ -1,8 +1,11 @@
 import 'dart:io';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'dart:isolate';
 
+import 'package:flutter/foundation.dart'; // Para debugPrint
+import 'package:flutter/services.dart';
 import 'package:image_editor/image_editor.dart';
+import 'package:image_size_getter/file_input.dart';
+import 'package:image_size_getter/image_size_getter.dart';
 import 'package:intl/intl.dart';
 import 'package:native_exif/native_exif.dart';
 
@@ -17,53 +20,86 @@ class PhotoWatermarkProcessor {
     required WatermarkConfig config,
     required LocationData location,
   }) async {
-    try {
-      final File inputFile = File(inputPath);
-      final Uint8List photoBytes = await inputFile.readAsBytes();
-      final Uint8List watermarkBytes = await watermarkFile.readAsBytes();
-      final ui.Image photoImage = await _decodeImage(photoBytes);
-      final ui.Image watermarkImage = await _decodeImage(watermarkBytes);
+    final RootIsolateToken rootToken = RootIsolateToken.instance!;
+    
+    return Isolate.run(() async {
+      BackgroundIsolateBinaryMessenger.ensureInitialized(rootToken);
+      final Stopwatch stopwatch = Stopwatch()..start();
+      
+      try {
+        final File inputFile = File(inputPath);
+        final Size rawSize = ImageSizeGetter.getSizeResult(FileInput(inputFile)).size;
+        int logicalWidth = rawSize.width;
+        int logicalHeight = rawSize.height;
 
-      final int targetWidth =
-          (photoImage.width * _photoOverlayWidthFactor(config)).round();
-      final int targetHeight =
-          (targetWidth * watermarkImage.height / watermarkImage.width).round();
-      final int safeWidth = targetWidth.clamp(1, photoImage.width);
-      final int safeHeight = targetHeight.clamp(1, photoImage.height);
-      final int x = ((photoImage.width - safeWidth) / 2).round();
-      final int y =
-          (photoImage.height - safeHeight - (photoImage.height * 0.02))
-              .round()
-              .clamp(0, photoImage.height - safeHeight);
+        // Leer orientación de EXIF para saber si la imagen está rotada lógicamente
+        final Exif tempExif = await Exif.fromPath(inputPath);
+        final Map<String, Object>? attributes = await tempExif.getAttributes();
+        await tempExif.close();
 
-      final ImageEditorOption option = ImageEditorOption()
-        ..outputFormat = const OutputFormat.jpeg(95)
-        ..addOption(
-          MixImageOption(
-            target: ImageSource.memory(watermarkBytes),
-            x: x,
-            y: y,
-            width: safeWidth,
-            height: safeHeight,
-          ),
+        if (attributes != null) {
+          final String orientation = attributes['Orientation']?.toString() ?? '1';
+          // 6 = Rotate 90 CW, 8 = Rotate 270 CW
+          if (orientation == '6' || orientation == '8' || orientation.contains('90') || orientation.contains('270')) {
+             logicalWidth = rawSize.height;
+             logicalHeight = rawSize.width;
+          }
+        }
+        
+        final Uint8List watermarkBytes = await watermarkFile.readAsBytes();
+        final Size watermarkSize = ImageSizeGetter.getSizeResult(MemoryInput(watermarkBytes)).size;
+
+        final int targetWidth =
+            (logicalWidth * _photoOverlayWidthFactor(config)).round();
+        final int targetHeight =
+            (targetWidth * watermarkSize.height / watermarkSize.width).round();
+        final int safeWidth = targetWidth.clamp(1, logicalWidth);
+        final int safeHeight = targetHeight.clamp(1, logicalHeight);
+        
+        final int x = ((logicalWidth - safeWidth) / 2).round();
+        final int y =
+            (logicalHeight - safeHeight - (logicalHeight * 0.02))
+                .round()
+                .clamp(0, logicalHeight - safeHeight);
+
+        final ImageEditorOption option = ImageEditorOption()
+          ..outputFormat = const OutputFormat.jpeg(95)
+          ..addOption(
+            MixImageOption(
+              target: ImageSource.memory(watermarkBytes),
+              x: x,
+              y: y,
+              width: safeWidth,
+              height: safeHeight,
+            ),
+          );
+
+        final Uint8List? result = await ImageEditor.editFileImage(
+          file: inputFile,
+          imageEditorOption: option,
         );
+        
+        if (result == null || result.isEmpty) {
+          debugPrint('Watermark Processor: ImageEditor returned null/empty in ${stopwatch.elapsedMilliseconds}ms');
+          return null;
+        }
 
-      final Uint8List? result = await ImageEditor.editFileImage(
-        file: inputFile,
-        imageEditorOption: option,
-      );
-      if (result == null || result.isEmpty) return null;
-
-      await File(outputPath).writeAsBytes(result, flush: true);
-      await _writePhotoExif(
-        sourcePath: inputPath,
-        outputPath: outputPath,
-        location: location,
-      );
-      return outputPath;
-    } catch (_) {
-      return null;
-    }
+        await File(outputPath).writeAsBytes(result, flush: true);
+        await _writePhotoExif(
+          sourcePath: inputPath,
+          outputPath: outputPath,
+          location: location,
+        );
+        
+        stopwatch.stop();
+        debugPrint('⏱️ Watermark Processor (Isolate) finalizado en: ${stopwatch.elapsedMilliseconds}ms');
+        
+        return outputPath;
+      } catch (e) {
+        debugPrint('Watermark Processor Error: $e');
+        return null;
+      }
+    });
   }
 
   static double _photoOverlayWidthFactor(WatermarkConfig config) {
@@ -113,10 +149,5 @@ class PhotoWatermarkProcessor {
       await outputExif?.close();
     }
   }
-
-  static Future<ui.Image> _decodeImage(Uint8List bytes) async {
-    final ui.Codec codec = await ui.instantiateImageCodec(bytes);
-    final ui.FrameInfo frameInfo = await codec.getNextFrame();
-    return frameInfo.image;
-  }
 }
+

@@ -57,6 +57,7 @@ class CircularPreview extends StatelessWidget {
                         Image.file(
                           File(filePath!),
                           fit: BoxFit.cover,
+                          cacheWidth: 150,
                           errorBuilder: (_, __, ___) => const Center(
                             child: Icon(
                               CupertinoIcons.photo,

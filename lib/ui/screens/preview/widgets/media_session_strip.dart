@@ -53,6 +53,7 @@ class MediaSessionStrip extends StatelessWidget {
                       Image.file(
                         File(path),
                         fit: BoxFit.cover,
+                        cacheWidth: 200,
                         errorBuilder: (_, __, ___) {
                           return Container(color: Colors.white12);
                         },
